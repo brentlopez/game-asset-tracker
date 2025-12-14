@@ -101,6 +101,8 @@ class ScraperGUI:
         self.sleep_max_var = tk.StringVar(value="800")
         self.burst_size_var = tk.StringVar(value="5")
         self.burst_sleep_var = tk.StringVar(value="3000")
+        # proxies
+        self.proxy_file_var = tk.StringVar(value="")
         
         # Create labeled inputs
         row = 0
@@ -137,6 +139,15 @@ class ScraperGUI:
         url_frame.columnconfigure(0, weight=1)
         ttk.Entry(url_frame, textvariable=self.url_file_var).grid(row=0, column=0, sticky=(tk.W, tk.E))
         ttk.Button(url_frame, text="Browse", command=self._browse_url_file, width=8).grid(row=0, column=1, padx=(5, 0))
+        
+        # Proxy list file
+        row += 1
+        ttk.Label(params_frame, text="Proxy list file (one URL per line):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        proxy_frame = ttk.Frame(params_frame)
+        proxy_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        proxy_frame.columnconfigure(0, weight=1)
+        ttk.Entry(proxy_frame, textvariable=self.proxy_file_var).grid(row=0, column=0, sticky=(tk.W, tk.E))
+        ttk.Button(proxy_frame, text="Browse", command=self._browse_proxy_file, width=8).grid(row=0, column=1, padx=(5, 0))
         
         # Cadence inputs
         row += 1
@@ -222,6 +233,15 @@ class ScraperGUI:
         if filename:
             self.url_file_var.set(Path(filename).name)  # Store just the filename
     
+    def _browse_proxy_file(self):
+        filename = filedialog.askopenfilename(
+            title="Select proxy list file",
+            initialdir=Path(__file__).parent,
+            filetypes=[("Text files", "*.txt *.list"), ("All files", "*.*")]
+        )
+        if filename:
+            self.proxy_file_var.set(Path(filename).name)
+    
     def _build_command(self):
         """Build the command line arguments from GUI inputs"""
         cmd = [sys.executable, str(self.script_path)]
@@ -256,6 +276,8 @@ class ScraperGUI:
         cmd.extend(["--sleep-max-ms", self.sleep_max_var.get()])
         cmd.extend(["--burst-size", self.burst_size_var.get()])
         cmd.extend(["--burst-sleep-ms", self.burst_sleep_var.get()])
+        if self.proxy_file_var.get().strip():
+            cmd.extend(["--proxy-list", self.proxy_file_var.get().strip()])
         
         # Add parameters with values
         cmd.extend(["--max-scrolls", self.max_scrolls_var.get()])

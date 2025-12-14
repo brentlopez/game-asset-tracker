@@ -36,6 +36,7 @@ import time
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import random
+import urllib.parse
 from pathlib import Path
 from typing import Dict, List, Set, Iterable
 
@@ -471,11 +472,28 @@ def _per_page_sleep(args, page_index: int):
         time.sleep(max(0, args.burst_sleep_ms) / 1000.0)
 
 
+def _proxy_to_playwright(proxy_url: str | None) -> dict | None:
+    if not proxy_url:
+        return None
+    try:
+        u = urllib.parse.urlparse(proxy_url)
+        server = f"{u.scheme}://{u.hostname}:{u.port}" if u.hostname and u.port else proxy_url
+        pd = {"server": server}
+        if u.username:
+            pd["username"] = urllib.parse.unquote(u.username)
+        if u.password:
+            pd["password"] = urllib.parse.unquote(u.password)
+        return pd
+    except Exception:
+        return {"server": proxy_url}
+
+
 def _scrape_url_process_worker(url: str, idx: int, total: int, 
                                 auth_file_path: str, headless: bool, 
                                 skip_on_captcha: bool, block_heavy: bool, out_path: str,
                                 *, randomize_ua: bool = False, auth_on_listings: bool = False,
-                                captcha_retry: bool = False, sleep_cfg: dict | None = None) -> bool:
+                                captcha_retry: bool = False, sleep_cfg: dict | None = None,
+                                proxy_url: str | None = None) -> bool:
     """Legacy per-URL worker: launches a browser per page."""
     
     """Worker function to scrape a single URL in a separate process.
@@ -491,7 +509,8 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
         try:
             print(f"Scraping {idx}/{total}: {url}")
             # Launch fresh browser for this worker
-            per_page_browser = p.chromium.launch(headless=headless)
+            pw_proxy = _proxy_to_playwright(proxy_url)
+            per_page_browser = p.chromium.launch(headless=headless, proxy=pw_proxy)
             try:
                 ctx_kwargs = _context_options(randomize_ua)
                 if auth_on_listings:
@@ -597,13 +616,15 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                                 *, randomize_ua: bool = False, auth_on_listings: bool = False,
                                 captcha_retry: bool = False, sleep_min_ms: int = 300,
                                 sleep_max_ms: int = 800, burst_size: int = 5,
-                                burst_sleep_ms: int = 3000) -> int:
+                                burst_sleep_ms: int = 3000,
+                                proxy_url: str | None = None) -> int:
     """Chunk worker: reuse one browser, new incognito context per URL.
     Returns the number of successfully written records.
     """
     written = 0
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        pw_proxy = _proxy_to_playwright(proxy_url)
+        browser = p.chromium.launch(headless=headless, proxy=pw_proxy)
         try:
             for offset, url in enumerate(urls, start=0):
                 idx = start_index + offset
@@ -701,6 +722,10 @@ def main() -> int:
     parser.add_argument("--burst-size", type=int, default=5, help="After this many pages, insert a longer burst sleep (default: 5)")
     parser.add_argument("--burst-sleep-ms", type=int, default=3000, help="Burst sleep duration in ms (default: 3000)")
     parser.add_argument("--captcha-retry", action="store_true", help="If a listing triggers captcha (skipped), retry once with backoff and UA switch")
+
+    # Proxies
+    parser.add_argument("--proxy", action="append", default=[], help="Proxy server URL, e.g. http://user:pass@host:port (can be repeated)")
+    parser.add_argument("--proxy-list", type=str, help="Path to file with one proxy URL per line")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -832,6 +857,22 @@ def main() -> int:
 
         total = len(urls)
         
+        # Load proxies if provided
+        proxies: List[str] = []
+        if args.proxy_list:
+            try:
+                with open(args.proxy_list, "r", encoding="utf-8") as pf:
+                    for line in pf:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        proxies.append(line)
+            except Exception as e:
+                print(f"WARNING: Failed to read proxy list: {e}", file=sys.stderr)
+        if args.proxy:
+            proxies.extend(args.proxy)
+        proxies = [p for p in proxies if p]
+
         # Parallel scraping mode
         if args.parallel > 1:
             debug(f"Starting parallel scraping with {args.parallel} workers...")
@@ -856,24 +897,28 @@ def main() -> int:
                     print("NOTE: --reuse-browser overrides --new-browser-per-page in parallel mode", file=sys.stderr)
                 url_chunks = chunked(urls, args.parallel)
                 with ProcessPoolExecutor(max_workers=args.parallel) as executor:
-                    futures = [executor.submit(
-                        _scrape_urls_process_worker,
-                        chunk,
-                        start_index+1,
-                        total,
-                        str(auth_file),
-                        args.headless,
-                        args.skip_on_captcha,
-                        args.block_heavy,
-                        str(out_path),
-                        randomize_ua=args.randomize_ua,
-                        auth_on_listings=args.auth_on_listings,
-                        captcha_retry=args.captcha_retry,
-                        sleep_min_ms=args.sleep_min_ms,
-                        sleep_max_ms=args.sleep_max_ms,
-                        burst_size=args.burst_size,
-                        burst_sleep_ms=args.burst_sleep_ms
-                    ) for start_index, chunk in enumerate(url_chunks)]
+                    futures = []
+                    for start_index, chunk in enumerate(url_chunks):
+                        proxy_url = proxies[start_index % len(proxies)] if proxies else None
+                        futures.append(executor.submit(
+                            _scrape_urls_process_worker,
+                            chunk,
+                            start_index+1,
+                            total,
+                            str(auth_file),
+                            args.headless,
+                            args.skip_on_captcha,
+                            args.block_heavy,
+                            str(out_path),
+                            randomize_ua=args.randomize_ua,
+                            auth_on_listings=args.auth_on_listings,
+                            captcha_retry=args.captcha_retry,
+                            sleep_min_ms=args.sleep_min_ms,
+                            sleep_max_ms=args.sleep_max_ms,
+                            burst_size=args.burst_size,
+                            burst_sleep_ms=args.burst_sleep_ms,
+                            proxy_url=proxy_url
+                        ))
                     completed = 0
                     for fut in as_completed(futures):
                         try:
@@ -885,14 +930,18 @@ def main() -> int:
             else:
                 # Per-URL process (old behavior)
                 with ProcessPoolExecutor(max_workers=args.parallel) as executor:
-                    future_to_url = {executor.submit(_scrape_url_process_worker, 
-                                                     url, idx, total, 
-                                                     str(auth_file), args.headless, 
-                                                     args.skip_on_captcha, args.block_heavy, str(out_path),
-                                                     randomize_ua=args.randomize_ua,
-                                                     auth_on_listings=args.auth_on_listings,
-                                                     captcha_retry=args.captcha_retry): (url, idx) 
-                                     for idx, url in enumerate(urls, start=1)}
+                    future_to_url = {}
+                    for idx, url in enumerate(urls, start=1):
+                        proxy_url = proxies[(idx-1) % len(proxies)] if proxies else None
+                        fut = executor.submit(_scrape_url_process_worker, 
+                                              url, idx, total, 
+                                              str(auth_file), args.headless, 
+                                              args.skip_on_captcha, args.block_heavy, str(out_path),
+                                              randomize_ua=args.randomize_ua,
+                                              auth_on_listings=args.auth_on_listings,
+                                              captcha_retry=args.captcha_retry,
+                                              proxy_url=proxy_url)
+                        future_to_url[fut] = (url, idx)
                     completed = 0
                     for future in as_completed(future_to_url):
                         try:
