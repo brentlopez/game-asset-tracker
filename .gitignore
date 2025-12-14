@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+env/
+ENV/
+.venv
+
+# TypeScript / Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+dist/
+build/
+.npm
+.eslintcache
+
+# Obsidian Plugin
+obsidian-plugin/main.js
+obsidian-plugin/styles.css
+obsidian-plugin/*.js.map
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Generated files
+schemas/*.generated.json
+output/
+temp/
+tmp/
+
+# JSON manifests (optional - uncomment if you don't want to commit generated JSON)
+# *.json
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+auth.json
+
+# Ingestion scripts caches and auth
+ingestion-scripts/**/auth.json
+ingestion-scripts/**/*_metadata.json
+ingestion-scripts/**/fab_metadata.json
