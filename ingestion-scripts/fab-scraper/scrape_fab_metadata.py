@@ -33,6 +33,8 @@ import json
 import re
 import sys
 import time
+import threading
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Set
 
@@ -49,6 +51,15 @@ PER_PAGE_SLEEP_SEC = 0.5
 
 # Safety limits
 MAX_SCROLLS = 50
+
+# Incremental scroll tuning
+SCROLL_STEP_PX = 1200
+SCROLL_STEPS_PER_ROUND = 8
+STABLE_ROUNDS_THRESHOLD = 2
+
+# Captcha detection
+CAPTCHA_TITLE_KEYWORDS = ["One more step", "Just a moment", "verification", "captcha", "Checking your browser"]
+CAPTCHA_WAIT_TIMEOUT_SEC = 120
 
 
 UUID_RE = re.compile(r"/listings/([0-9a-fA-F-]{36})")
@@ -71,29 +82,60 @@ def wait_network_idle_if_possible(page: Page, timeout_ms: int = NETWORK_IDLE_TIM
         page.wait_for_timeout(min(timeout_ms, 2000))
 
 
-def infinite_scroll_to_load_all(page: Page, max_scrolls: int = MAX_SCROLLS, idle_wait_ms: int = SCROLL_IDLE_WAIT_MS) -> int:
+def infinite_scroll_to_load_all(
+    page: Page,
+    max_scrolls: int = MAX_SCROLLS,
+    idle_wait_ms: int = SCROLL_IDLE_WAIT_MS,
+    step_px: int = SCROLL_STEP_PX,
+    steps_per_round: int = SCROLL_STEPS_PER_ROUND,
+    stable_rounds_threshold: int = STABLE_ROUNDS_THRESHOLD,
+) -> int:
     last_count = 0
+    last_height = page.evaluate("() => document.body.scrollHeight") or 0
     stable_rounds = 0
 
     for i in range(max_scrolls):
-        # Scroll to bottom
+        # Incremental wheel scrolling to trigger lazy loaders
+        for _ in range(steps_per_round):
+            try:
+                page.mouse.wheel(0, step_px)
+            except Exception:
+                # Fallback to JS scroll if wheel fails
+                page.evaluate("(dy)=>{window.scrollBy(0, dy)}", step_px)
+            page.wait_for_timeout(200)
+
+        # Ensure we've hit the bottom once this round
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        # Give time for new content to load
+
+        # Attempt to wait for more items to appear
+        try:
+            page.wait_for_function(
+                "({ sel, prev }) => document.querySelectorAll(sel).length > prev",
+                arg={ "sel": LISTING_LINK_SELECTOR, "prev": last_count },
+                timeout=3000,
+            )
+        except PlaywrightTimeoutError:
+            pass
+
+        # Give network some time and then idle wait
         wait_network_idle_if_possible(page)
         page.wait_for_timeout(idle_wait_ms)
 
-        # Count listing links
+        # Check counts and document height
         count = page.locator(LISTING_LINK_SELECTOR).count()
-        debug(f"[scroll {i+1}/{max_scrolls}] listings visible: {count}")
+        height = page.evaluate("() => document.body.scrollHeight") or 0
+        debug(f"[scroll {i+1}/{max_scrolls}] listings: {count} (Δ{count - last_count}), height: {height} (Δ{height - last_height})")
 
-        if count <= last_count:
+        progressed = (count > last_count) or (height > last_height)
+        if not progressed:
             stable_rounds += 1
         else:
             stable_rounds = 0
-        last_count = count
 
-        # If count hasn't increased for two consecutive rounds, assume we've reached the end
-        if stable_rounds >= 2:
+        last_count = count
+        last_height = height
+
+        if stable_rounds >= stable_rounds_threshold:
             break
 
     return last_count
@@ -141,10 +183,93 @@ def click_overview_and_expand(page: Page) -> None:
         pass
 
 
-def scrape_listing(page: Page, url: str) -> Dict:
+def detect_captcha(page: Page) -> bool:
+    """Check if the current page is showing a captcha/verification challenge."""
+    # Strategy 1: Check page title
+    try:
+        title = (page.title() or "").lower()
+        for keyword in CAPTCHA_TITLE_KEYWORDS:
+            if keyword.lower() in title:
+                debug(f"Captcha detected via title: '{title}'")
+                return True
+    except Exception:
+        pass
+    
+    # Strategy 2: Check URL for common captcha/challenge paths
+    try:
+        url = page.url
+        if any(pattern in url.lower() for pattern in ["challenge", "captcha", "verify", "cdn-cgi/challenge"]):
+            debug(f"Captcha detected via URL: '{url}'")
+            return True
+    except Exception:
+        pass
+    
+    # Strategy 3: Check for common captcha DOM elements
+    try:
+        # Cloudflare challenge
+        if page.locator("#challenge-form").count() > 0:
+            debug("Captcha detected via #challenge-form")
+            return True
+        if page.locator("#cf-challenge-running").count() > 0:
+            debug("Captcha detected via #cf-challenge-running")
+            return True
+        # Generic captcha iframes
+        if page.locator("iframe[src*='captcha']").count() > 0:
+            debug("Captcha detected via captcha iframe")
+            return True
+        if page.locator("iframe[src*='recaptcha']").count() > 0:
+            debug("Captcha detected via recaptcha iframe")
+            return True
+        # Check for h1/h2 with verification text
+        headings = page.locator("h1, h2").all_text_contents()
+        for heading in headings:
+            heading_lower = heading.lower()
+            if any(kw in heading_lower for kw in ["verification", "checking your browser", "one more step", "just a moment"]):
+                debug(f"Captcha detected via heading: '{heading}'")
+                return True
+    except Exception as e:
+        debug(f"Error checking captcha DOM elements: {e}")
+        pass
+    
+    return False
+
+
+def wait_for_captcha_solve(page: Page, timeout_sec: int = CAPTCHA_WAIT_TIMEOUT_SEC) -> bool:
+    """Wait for user to manually solve captcha. Returns True if solved, False if timeout."""
+    print("\n" + "="*60, file=sys.stderr)
+    print("⚠️  CAPTCHA DETECTED", file=sys.stderr)
+    print("="*60, file=sys.stderr)
+    print(f"Please solve the captcha in the browser window within {timeout_sec} seconds.", file=sys.stderr)
+    print("The script will automatically continue once the captcha is solved.", file=sys.stderr)
+    print("="*60 + "\n", file=sys.stderr)
+    
+    start_time = time.time()
+    while time.time() - start_time < timeout_sec:
+        if not detect_captcha(page):
+            print("✓ Captcha solved! Continuing...", file=sys.stderr)
+            page.wait_for_timeout(1000)  # Brief pause after solve
+            return True
+        time.sleep(2)
+    
+    print("✗ Captcha solve timeout. Skipping this page.", file=sys.stderr)
+    return False
+
+
+def scrape_listing(page: Page, url: str, skip_on_captcha: bool = False) -> Dict | None:
     page.goto(url, wait_until="domcontentloaded")
     # Give SPA content a moment
     wait_network_idle_if_possible(page)
+
+    # Check for captcha
+    if detect_captcha(page):
+        if skip_on_captcha:
+            debug(f"Captcha detected on {url}, skipping due to --skip-on-captcha")
+            return None
+        else:
+            solved = wait_for_captcha_solve(page)
+            if not solved:
+                debug(f"Captcha not solved for {url}, skipping")
+                return None
 
     # Title
     title = None
@@ -217,12 +342,161 @@ def scrape_listing(page: Page, url: str) -> Dict:
     }
 
 
+def load_existing_metadata(path: Path) -> tuple[List[Dict], Set[str]]:
+    """Load existing metadata and return (records, fab_ids_seen)."""
+    if not path.exists():
+        return [], set()
+    
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            debug(f"Warning: {path} does not contain a JSON array, treating as empty")
+            return [], set()
+        
+        fab_ids = {record.get("fab_id") for record in data if record.get("fab_id")}
+        debug(f"Loaded {len(data)} existing records ({len(fab_ids)} unique fab_ids) from {path}")
+        return data, fab_ids
+    except Exception as e:
+        debug(f"Warning: Could not load existing metadata from {path}: {e}")
+        return [], set()
+
+
+# Global lock for thread-safe file writes
+_file_write_lock = threading.Lock()
+
+def save_metadata_incrementally(path: Path, records: List[Dict]) -> None:
+    """Save metadata to JSON file with thread-safe locking."""
+    with _file_write_lock:
+        try:
+            with path.open("w", encoding="utf-8") as f:
+                json.dump(records, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"ERROR: Failed to save metadata to {path}: {e}", file=sys.stderr)
+
+def append_metadata_record(path: Path, record: Dict) -> None:
+    """Append a single record to metadata file with thread-safe locking."""
+    with _file_write_lock:
+        try:
+            # Load existing data
+            if path.exists():
+                with path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, list):
+                    data = []
+            else:
+                data = []
+            
+            # Append new record
+            data.append(record)
+            
+            # Save back
+            with path.open("w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"ERROR: Failed to append metadata to {path}: {e}", file=sys.stderr)
+
+
+def _scrape_url_process_worker(url: str, idx: int, total: int, 
+                                auth_file_path: str, headless: bool, 
+                                skip_on_captcha: bool, out_path: str) -> bool:
+    """Worker function to scrape a single URL in a separate process.
+    
+    Returns True if successful, False otherwise.
+    """
+    import fcntl
+    
+    with sync_playwright() as p:
+        per_page_browser = None
+        per_page_context = None
+        listing_page = None
+        try:
+            print(f"Scraping {idx}/{total}: {url}")
+            # Launch fresh browser for this worker
+            per_page_browser = p.chromium.launch(headless=headless)
+            try:
+                per_page_context = per_page_browser.new_context(storage_state=auth_file_path)
+            except Exception as e:
+                debug(f"Failed to create context with auth: {e}")
+                return False
+            
+            listing_page = per_page_context.new_page()
+            data = scrape_listing(listing_page, url, skip_on_captcha=skip_on_captcha)
+            if data is None:
+                debug(f"Skipped {url} (captcha or error)")
+                return False
+            
+            # Fallback: if title is missing, try to read document.title
+            if not data.get("title"):
+                try:
+                    data["title"] = (listing_page.title() or "").strip() or None
+                except Exception:
+                    pass
+            
+            # Write to file with file locking (cross-process safe)
+            out_path_obj = Path(out_path)
+            try:
+                with open(out_path_obj, "r+" if out_path_obj.exists() else "w+", encoding="utf-8") as f:
+                    # Acquire exclusive lock
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    try:
+                        # Read existing data
+                        f.seek(0)
+                        content = f.read()
+                        if content:
+                            existing_data = json.loads(content)
+                            if not isinstance(existing_data, list):
+                                existing_data = []
+                        else:
+                            existing_data = []
+                        
+                        # Append new record
+                        existing_data.append(data)
+                        
+                        # Write back
+                        f.seek(0)
+                        f.truncate()
+                        json.dump(existing_data, f, ensure_ascii=False, indent=2)
+                    finally:
+                        # Release lock
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except Exception as e:
+                print(f"ERROR: Failed to save record for {url}: {e}", file=sys.stderr)
+                return False
+            
+            return True
+        except Exception as e:
+            print(f"WARNING: Failed to scrape {url}: {e}", file=sys.stderr)
+            return False
+        finally:
+            # Clean up per-worker browser/context
+            try:
+                if listing_page:
+                    listing_page.close()
+                if per_page_context:
+                    per_page_context.close()
+                if per_page_browser:
+                    per_page_browser.close()
+            except Exception:
+                pass
+            time.sleep(PER_PAGE_SLEEP_SEC)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scrape Fab Library metadata → fab_metadata.json")
     parser.add_argument("--headless", action="store_true", help="Run browser headless (default: False)")
     parser.add_argument("--max-scrolls", type=int, default=MAX_SCROLLS, help="Safety limit for infinite scroll attempts (default: 50)")
     parser.add_argument("--out", type=str, default="fab_metadata.json", help="Output JSON filename (default: fab_metadata.json)")
     parser.add_argument("--clear-cache", action="store_true", help="Delete existing output file before scraping")
+    parser.add_argument("--scroll-step", type=int, default=SCROLL_STEP_PX, help="Pixels per incremental scroll (default: 1200)")
+    parser.add_argument("--scroll-steps", type=int, default=SCROLL_STEPS_PER_ROUND, help="Incremental scroll steps per round (default: 8)")
+    parser.add_argument("--test-scroll", action="store_true", help="Only test infinite scroll on the library page and report counts; do not scrape listings or write output")
+    parser.add_argument("--use-url-file", type=str, default="fab_library_urls.json", help="Load URLs from this JSON file instead of scraping the library page (default: fab_library_urls.json)")
+    parser.add_argument("--skip-library-scrape", action="store_true", help="Skip library page scraping and use URLs from --use-url-file instead")
+    parser.add_argument("--skip-on-captcha", action="store_true", help="Skip pages with captchas instead of waiting for manual solve")
+    parser.add_argument("--force-rescrape", action="store_true", help="Rescrape all URLs even if fab_id already exists in output file")
+    parser.add_argument("--new-browser-per-page", action="store_true", help="Open each URL in a fresh browser instance (avoids captchas on subsequent pages)")
+    parser.add_argument("--parallel", type=int, default=1, help="Number of parallel browser instances to run (default: 1 = sequential)")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -232,12 +506,16 @@ def main() -> int:
         return 1
 
     out_path = script_dir / args.out
+    
+    # Load existing metadata or clear if requested
     if args.clear_cache and out_path.exists():
         try:
             out_path.unlink()
             debug(f"Cleared cache file: {out_path}")
         except Exception as e:
             print(f"WARNING: Failed to clear cache file {out_path}: {e}", file=sys.stderr)
+    
+    results, scraped_fab_ids = load_existing_metadata(out_path)
 
     with sync_playwright() as p:
         browser: Browser
@@ -251,15 +529,66 @@ def main() -> int:
             return 1
 
         page = context.new_page()
-        debug(f"Navigating to {LIBRARY_URL} …")
-        page.goto(LIBRARY_URL, wait_until="domcontentloaded")
-        wait_network_idle_if_possible(page)
+        
+        urls: List[str] = []
+        if args.skip_library_scrape:
+            # Load URLs from JSON file instead of scraping
+            url_file_path = script_dir / args.use_url_file
+            if not url_file_path.exists():
+                print(f"ERROR: URL file not found at {url_file_path}", file=sys.stderr)
+                try:
+                    context.close()
+                    browser.close()
+                except Exception:
+                    pass
+                return 1
+            
+            try:
+                with url_file_path.open("r", encoding="utf-8") as f:
+                    urls = json.load(f)
+                if not isinstance(urls, list):
+                    print(f"ERROR: {url_file_path} must contain a JSON array of URLs", file=sys.stderr)
+                    return 1
+                debug(f"Loaded {len(urls)} URLs from {url_file_path}")
+            except Exception as e:
+                print(f"ERROR: Failed to load URL file {url_file_path}: {e}", file=sys.stderr)
+                try:
+                    context.close()
+                    browser.close()
+                except Exception:
+                    pass
+                return 1
+        else:
+            # Original behavior: scrape library page
+            debug(f"Navigating to {LIBRARY_URL} …")
+            page.goto(LIBRARY_URL, wait_until="domcontentloaded")
+            wait_network_idle_if_possible(page)
 
-        debug("Beginning infinite scroll to load all listings …")
-        final_count = infinite_scroll_to_load_all(page, max_scrolls=args.max_scrolls)
-        debug(f"Finished scrolling. Listings detected: {final_count}")
+            debug("Beginning infinite scroll to load all listings …")
+            final_count = infinite_scroll_to_load_all(
+                page,
+                max_scrolls=args.max_scrolls,
+                step_px=args.scroll_step,
+                steps_per_round=args.scroll_steps,
+            )
+            debug(f"Finished scrolling. Listings detected: {final_count}")
 
-        urls = collect_listing_urls(page)
+            urls = collect_listing_urls(page)
+        if args.test_scroll:
+            # Report counts and exit without scraping
+            print(f"Test-scroll complete. Visible listing links: {final_count}. Unique URLs collected: {len(urls)}")
+            if urls:
+                sample = urls[:10]
+                print("Sample URLs:")
+                for u in sample:
+                    print(f" - {u}")
+            try:
+                context.close()
+                browser.close()
+            except Exception:
+                pass
+            return 0
+
         if not urls:
             print("No listing URLs found. Exiting.", file=sys.stderr)
             try:
@@ -271,39 +600,149 @@ def main() -> int:
 
         debug(f"Collected {len(urls)} unique listing URLs.")
 
-        results: List[Dict] = []
-        total = len(urls)
-        for idx, url in enumerate(urls, start=1):
-            # New page per listing (reuse same context for auth/cookies)
-            listing_page = context.new_page()
+        # Filter out already-scraped URLs if not forcing rescrape
+        if not args.force_rescrape:
+            original_count = len(urls)
+            urls_to_scrape = []
+            for url in urls:
+                fab_id = extract_uuid_from_url(url)
+                if fab_id and fab_id in scraped_fab_ids:
+                    continue
+                urls_to_scrape.append(url)
+            
+            skipped = original_count - len(urls_to_scrape)
+            if skipped > 0:
+                debug(f"Skipping {skipped} already-scraped URLs. {len(urls_to_scrape)} remaining.")
+            urls = urls_to_scrape
+        
+        if not urls:
+            print(f"All URLs already scraped. {len(results)} total records in {out_path}")
             try:
-                print(f"Scraping {idx}/{total}: {url}")
-                data = scrape_listing(listing_page, url)
-                # Fallback: if title is missing, try to read document.title
-                if not data.get("title"):
+                context.close()
+                browser.close()
+            except Exception:
+                pass
+            return 0
+
+        total = len(urls)
+        
+        # Parallel scraping mode
+        if args.parallel > 1:
+            debug(f"Starting parallel scraping with {args.parallel} workers...")
+            
+            # Close initial browser/context since workers will create their own
+            try:
+                context.close()
+                browser.close()
+            except Exception:
+                pass
+            
+            # Execute scraping in parallel using process pool
+            with ProcessPoolExecutor(max_workers=args.parallel) as executor:
+                # Submit all tasks
+                future_to_url = {executor.submit(_scrape_url_process_worker, 
+                                                 url, idx, total, 
+                                                 str(auth_file), args.headless, 
+                                                 args.skip_on_captcha, str(out_path)): (url, idx) 
+                                 for idx, url in enumerate(urls, start=1)}
+                
+                # Process results as they complete
+                completed = 0
+                for future in as_completed(future_to_url):
+                    completed += 1
                     try:
-                        data["title"] = (listing_page.title() or "").strip() or None
+                        success = future.result()
+                        if success:
+                            debug(f"Saved progress: {completed}/{total} completed")
+                    except Exception as e:
+                        debug(f"Worker failed: {e}")
+        
+        elif args.new_browser_per_page:
+            # Close initial browser/context since we'll open fresh ones per URL
+            try:
+                context.close()
+                browser.close()
+            except Exception:
+                pass
+            
+            # Scrape each URL in a fresh browser instance
+            for idx, url in enumerate(urls, start=1):
+                per_page_browser = None
+                per_page_context = None
+                listing_page = None
+                try:
+                    print(f"Scraping {idx}/{total}: {url}")
+                    # Launch fresh browser
+                    per_page_browser = p.chromium.launch(headless=args.headless)
+                    try:
+                        per_page_context = per_page_browser.new_context(storage_state=str(auth_file))
+                    except Exception as e:
+                        debug(f"Failed to create context with auth: {e}")
+                        continue
+                    
+                    listing_page = per_page_context.new_page()
+                    data = scrape_listing(listing_page, url, skip_on_captcha=args.skip_on_captcha)
+                    if data is None:
+                        debug(f"Skipped {url} (captcha or error)")
+                        continue
+                    # Fallback: if title is missing, try to read document.title
+                    if not data.get("title"):
+                        try:
+                            data["title"] = (listing_page.title() or "").strip() or None
+                        except Exception:
+                            pass
+                    results.append(data)
+                    # Save incrementally after each successful scrape
+                    save_metadata_incrementally(out_path, results)
+                    debug(f"Saved progress: {len(results)} total records")
+                except Exception as e:
+                    print(f"WARNING: Failed to scrape {url}: {e}", file=sys.stderr)
+                finally:
+                    # Clean up per-page browser/context
+                    try:
+                        if listing_page:
+                            listing_page.close()
+                        if per_page_context:
+                            per_page_context.close()
+                        if per_page_browser:
+                            per_page_browser.close()
                     except Exception:
                         pass
-                results.append(data)
-            except Exception as e:
-                print(f"WARNING: Failed to scrape {url}: {e}", file=sys.stderr)
-            finally:
+                    time.sleep(PER_PAGE_SLEEP_SEC)
+        else:
+            # Original mode: reuse same browser/context for all pages
+            for idx, url in enumerate(urls, start=1):
+                listing_page = context.new_page()
                 try:
-                    listing_page.close()
-                except Exception:
-                    pass
-                time.sleep(PER_PAGE_SLEEP_SEC)
+                    print(f"Scraping {idx}/{total}: {url}")
+                    data = scrape_listing(listing_page, url, skip_on_captcha=args.skip_on_captcha)
+                    if data is None:
+                        debug(f"Skipped {url} (captcha or error)")
+                        continue
+                    # Fallback: if title is missing, try to read document.title
+                    if not data.get("title"):
+                        try:
+                            data["title"] = (listing_page.title() or "").strip() or None
+                        except Exception:
+                            pass
+                    results.append(data)
+                    # Save incrementally after each successful scrape
+                    save_metadata_incrementally(out_path, results)
+                    debug(f"Saved progress: {len(results)} total records")
+                except Exception as e:
+                    print(f"WARNING: Failed to scrape {url}: {e}", file=sys.stderr)
+                finally:
+                    try:
+                        listing_page.close()
+                    except Exception:
+                        pass
+                    time.sleep(PER_PAGE_SLEEP_SEC)
 
-        # Write output JSON (array)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
-
-        try:
-            context.close()
-            browser.close()
-        except Exception:
-            pass
+            try:
+                context.close()
+                browser.close()
+            except Exception:
+                pass
 
     print(f"Wrote {len(results)} records to {out_path}")
     return 0
