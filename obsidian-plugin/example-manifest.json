@@ -1,0 +1,40 @@
+{
+  "pack_id": "550e8400-e29b-41d4-a716-446655440000",
+  "pack_name": "Example Asset Pack",
+  "root_path": "/path/to/assets/example-pack",
+  "source": "Test Source",
+  "license_link": "https://example.com/license",
+  "global_tags": ["example", "test", "3d-models"],
+  "assets": [
+    {
+      "relative_path": "Models/Character.fbx",
+      "file_type": "fbx",
+      "size_bytes": 2048000,
+      "metadata": {
+        "poly_count": "5000",
+        "rigged": "true"
+      },
+      "local_tags": ["models", "character"]
+    },
+    {
+      "relative_path": "Textures/Diffuse.png",
+      "file_type": "png",
+      "size_bytes": 1024000,
+      "metadata": {
+        "dimensions": "1024x1024",
+        "format": "RGBA"
+      },
+      "local_tags": ["textures", "diffuse"]
+    },
+    {
+      "relative_path": "Audio/Footstep.wav",
+      "file_type": "wav",
+      "size_bytes": 512000,
+      "metadata": {
+        "duration": "1.5s",
+        "sample_rate": "44100"
+      },
+      "local_tags": ["audio", "sfx"]
+    }
+  ]
+}
