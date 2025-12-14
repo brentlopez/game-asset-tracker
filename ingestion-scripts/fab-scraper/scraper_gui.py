@@ -66,6 +66,9 @@ class ScraperGUI:
         self.new_browser_var = tk.BooleanVar(value=False)
         self.block_heavy_var = tk.BooleanVar(value=True)
         self.reuse_browser_var = tk.BooleanVar(value=True)
+        self.randomize_ua_var = tk.BooleanVar(value=True)
+        self.auth_on_listings_var = tk.BooleanVar(value=False)
+        self.captcha_retry_var = tk.BooleanVar(value=True)
         
         # Create checkboxes in a grid
         ttk.Checkbutton(flags_frame, text="Headless mode", variable=self.headless_var).grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
@@ -76,7 +79,10 @@ class ScraperGUI:
         ttk.Checkbutton(flags_frame, text="Force rescrape all URLs", variable=self.force_rescrape_var).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
         ttk.Checkbutton(flags_frame, text="New browser per page (avoid captchas)", variable=self.new_browser_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
         ttk.Checkbutton(flags_frame, text="Reuse one browser per worker (new context per URL)", variable=self.reuse_browser_var).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-        ttk.Checkbutton(flags_frame, text="Block heavy resources (images/media/fonts/analytics)", variable=self.block_heavy_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(flags_frame, text="Randomize UA + viewport per context", variable=self.randomize_ua_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(flags_frame, text="Use auth on listing pages (normally off)", variable=self.auth_on_listings_var).grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(flags_frame, text="Captcha backoff + retry once", variable=self.captcha_retry_var).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(flags_frame, text="Block heavy resources (images/media/fonts/analytics)", variable=self.block_heavy_var).grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
         
         # === SECTION 2: Parameters with Values ===
         params_frame = ttk.LabelFrame(main_frame, text="Parameters", padding="10")
@@ -90,6 +96,11 @@ class ScraperGUI:
         self.parallel_var = tk.StringVar(value="1")
         self.out_file_var = tk.StringVar(value="fab_metadata.json")
         self.url_file_var = tk.StringVar(value="fab_library_urls.json")
+        # cadence
+        self.sleep_min_var = tk.StringVar(value="300")
+        self.sleep_max_var = tk.StringVar(value="800")
+        self.burst_size_var = tk.StringVar(value="5")
+        self.burst_sleep_var = tk.StringVar(value="3000")
         
         # Create labeled inputs
         row = 0
@@ -126,6 +137,20 @@ class ScraperGUI:
         url_frame.columnconfigure(0, weight=1)
         ttk.Entry(url_frame, textvariable=self.url_file_var).grid(row=0, column=0, sticky=(tk.W, tk.E))
         ttk.Button(url_frame, text="Browse", command=self._browse_url_file, width=8).grid(row=0, column=1, padx=(5, 0))
+        
+        # Cadence inputs
+        row += 1
+        ttk.Label(params_frame, text="Sleep min (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Entry(params_frame, textvariable=self.sleep_min_var, width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+        row += 1
+        ttk.Label(params_frame, text="Sleep max (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Entry(params_frame, textvariable=self.sleep_max_var, width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+        row += 1
+        ttk.Label(params_frame, text="Burst size:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Entry(params_frame, textvariable=self.burst_size_var, width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+        row += 1
+        ttk.Label(params_frame, text="Burst sleep (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Entry(params_frame, textvariable=self.burst_sleep_var, width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
         
         # === SECTION 3: Control Buttons ===
         control_frame = ttk.Frame(main_frame)
@@ -220,6 +245,17 @@ class ScraperGUI:
             cmd.append("--block-heavy")
         if self.reuse_browser_var.get():
             cmd.append("--reuse-browser")
+        if self.randomize_ua_var.get():
+            cmd.append("--randomize-ua")
+        if self.auth_on_listings_var.get():
+            cmd.append("--auth-on-listings")
+        if self.captcha_retry_var.get():
+            cmd.append("--captcha-retry")
+        # cadence
+        cmd.extend(["--sleep-min-ms", self.sleep_min_var.get()])
+        cmd.extend(["--sleep-max-ms", self.sleep_max_var.get()])
+        cmd.extend(["--burst-size", self.burst_size_var.get()])
+        cmd.extend(["--burst-sleep-ms", self.burst_sleep_var.get()])
         
         # Add parameters with values
         cmd.extend(["--max-scrolls", self.max_scrolls_var.get()])
@@ -278,6 +314,11 @@ class ScraperGUI:
                 raise ValueError("Parallel workers must be >= 1")
             if parallel > 20:
                 self._log("Warning: More than 20 parallel workers may cause issues", "warning")
+            # cadence
+            int(self.sleep_min_var.get())
+            int(self.sleep_max_var.get())
+            int(self.burst_size_var.get())
+            int(self.burst_sleep_var.get())
         except ValueError as e:
             self._log(f"Error: {e}", "error")
             return

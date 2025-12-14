@@ -35,6 +35,7 @@ import sys
 import time
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import random
 from pathlib import Path
 from typing import Dict, List, Set, Iterable
 
@@ -443,9 +444,38 @@ def append_metadata_record(path: Path, record: Dict) -> None:
             print(f"ERROR: Failed to append metadata to {path}: {e}", file=sys.stderr)
 
 
+UA_POOL = [
+    # A small, realistic UA pool (Chromium on macOS/Windows)
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+]
+
+def _context_options(randomize_ua: bool) -> dict:
+    opts: dict = {}
+    if randomize_ua:
+        ua = random.choice(UA_POOL)
+        opts["user_agent"] = ua
+        # Jitter viewport slightly
+        w = 1200 + random.randint(-40, 40)
+        h = 800 + random.randint(-30, 30)
+        opts["viewport"] = {"width": max(1024, w), "height": max(700, h)}
+    return opts
+
+
+def _per_page_sleep(args, page_index: int):
+    ms = random.randint(max(0, args.sleep_min_ms), max(args.sleep_min_ms, args.sleep_max_ms))
+    time.sleep(ms / 1000.0)
+    if args.burst_size > 0 and (page_index % args.burst_size == 0):
+        time.sleep(max(0, args.burst_sleep_ms) / 1000.0)
+
+
 def _scrape_url_process_worker(url: str, idx: int, total: int, 
                                 auth_file_path: str, headless: bool, 
-                                skip_on_captcha: bool, block_heavy: bool, out_path: str) -> bool:
+                                skip_on_captcha: bool, block_heavy: bool, out_path: str,
+                                *, randomize_ua: bool = False, auth_on_listings: bool = False,
+                                captcha_retry: bool = False, sleep_cfg: dict | None = None) -> bool:
     """Legacy per-URL worker: launches a browser per page."""
     
     """Worker function to scrape a single URL in a separate process.
@@ -463,9 +493,12 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
             # Launch fresh browser for this worker
             per_page_browser = p.chromium.launch(headless=headless)
             try:
-                per_page_context = per_page_browser.new_context(storage_state=auth_file_path)
+                ctx_kwargs = _context_options(randomize_ua)
+                if auth_on_listings:
+                    ctx_kwargs["storage_state"] = auth_file_path
+                per_page_context = per_page_browser.new_context(**ctx_kwargs)
             except Exception as e:
-                debug(f"Failed to create context with auth: {e}")
+                debug(f"Failed to create context: {e}")
                 return False
             
             # Optional: block heavy resources in worker
@@ -476,6 +509,27 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
             
             listing_page = per_page_context.new_page()
             data = scrape_listing(listing_page, url, skip_on_captcha=skip_on_captcha)
+            if data is None and captcha_retry:
+                # backoff, swap UA, retry once
+                time.sleep(2.0)
+                try:
+                    listing_page.close()
+                except Exception:
+                    pass
+                try:
+                    per_page_context.close()
+                except Exception:
+                    pass
+                try:
+                    ctx_kwargs = _context_options(True)
+                    if auth_on_listings:
+                        ctx_kwargs["storage_state"] = auth_file_path
+                    per_page_context = per_page_browser.new_context(**ctx_kwargs)
+                    setup_request_blocking(per_page_context, block_heavy)
+                    listing_page = per_page_context.new_page()
+                    data = scrape_listing(listing_page, url, skip_on_captcha=skip_on_captcha)
+                except Exception:
+                    data = None
             if data is None:
                 debug(f"Skipped {url} (captcha or error)")
                 return False
@@ -539,7 +593,11 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
 def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                                 auth_file_path: str, headless: bool,
                                 skip_on_captcha: bool, block_heavy: bool,
-                                out_path: str) -> int:
+                                out_path: str,
+                                *, randomize_ua: bool = False, auth_on_listings: bool = False,
+                                captcha_retry: bool = False, sleep_min_ms: int = 300,
+                                sleep_max_ms: int = 800, burst_size: int = 5,
+                                burst_sleep_ms: int = 3000) -> int:
     """Chunk worker: reuse one browser, new incognito context per URL.
     Returns the number of successfully written records.
     """
@@ -553,11 +611,32 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                 context = None
                 page = None
                 try:
-                    context = browser.new_context(storage_state=auth_file_path)
+                    ctx_kwargs = _context_options(randomize_ua)
+                    if auth_on_listings:
+                        ctx_kwargs["storage_state"] = auth_file_path
+                    context = browser.new_context(**ctx_kwargs)
                     # Optional request blocking
                     setup_request_blocking(context, block_heavy)
                     page = context.new_page()
                     data = scrape_listing(page, url, skip_on_captcha=skip_on_captcha)
+                    if data is None and captcha_retry:
+                        # backoff and swap UA, retry once
+                        time.sleep(2.0)
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
+                        try:
+                            context.close()
+                        except Exception:
+                            pass
+                        ctx_kwargs = _context_options(True)
+                        if auth_on_listings:
+                            ctx_kwargs["storage_state"] = auth_file_path
+                        context = browser.new_context(**ctx_kwargs)
+                        setup_request_blocking(context, block_heavy)
+                        page = context.new_page()
+                        data = scrape_listing(page, url, skip_on_captcha=skip_on_captcha)
                     if data is None:
                         debug(f"Skipped {url} (captcha or error)")
                         continue
@@ -570,6 +649,11 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                     append_metadata_record(Path(out_path), data)
                     written += 1
                     debug(f"Saved progress: {idx}/{total} completed")
+                    # Cadence shaping
+                    ms = random.randint(max(0, sleep_min_ms), max(sleep_min_ms, sleep_max_ms))
+                    time.sleep(ms/1000.0)
+                    if burst_size > 0 and (idx % burst_size == 0):
+                        time.sleep(max(0, burst_sleep_ms)/1000.0)
                 except Exception as e:
                     print(f"WARNING: Failed to scrape {url}: {e}", file=sys.stderr)
                 finally:
@@ -580,7 +664,10 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                             context.close()
                     except Exception:
                         pass
-                    time.sleep(PER_PAGE_SLEEP_SEC)
+                    if sleep_cfg:
+                        time.sleep(sleep_cfg.get("per_page", PER_PAGE_SLEEP_SEC))
+                    else:
+                        time.sleep(PER_PAGE_SLEEP_SEC)
         finally:
             try:
                 browser.close()
@@ -605,6 +692,15 @@ def main() -> int:
     parser.add_argument("--parallel", type=int, default=1, help="Number of parallel browser instances to run (default: 1 = sequential)")
     parser.add_argument("--block-heavy", action="store_true", help="Block heavy resources (images, media, fonts) and common analytics domains to speed up loads")
     parser.add_argument("--reuse-browser", action="store_true", help="Reuse a single browser per worker and create a fresh incognito context per URL (faster, reduces captchas vs new browser per page)")
+
+    # Anti-captcha mitigations
+    parser.add_argument("--auth-on-listings", action="store_true", help="Use auth storage when scraping listing pages (default: off)")
+    parser.add_argument("--randomize-ua", action="store_true", help="Randomize User-Agent and viewport per context")
+    parser.add_argument("--sleep-min-ms", type=int, default=300, help="Minimum per-page sleep in ms (default: 300)")
+    parser.add_argument("--sleep-max-ms", type=int, default=800, help="Maximum per-page sleep in ms (default: 800)")
+    parser.add_argument("--burst-size", type=int, default=5, help="After this many pages, insert a longer burst sleep (default: 5)")
+    parser.add_argument("--burst-sleep-ms", type=int, default=3000, help="Burst sleep duration in ms (default: 3000)")
+    parser.add_argument("--captcha-retry", action="store_true", help="If a listing triggers captcha (skipped), retry once with backoff and UA switch")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -769,7 +865,14 @@ def main() -> int:
                         args.headless,
                         args.skip_on_captcha,
                         args.block_heavy,
-                        str(out_path)
+                        str(out_path),
+                        randomize_ua=args.randomize_ua,
+                        auth_on_listings=args.auth_on_listings,
+                        captcha_retry=args.captcha_retry,
+                        sleep_min_ms=args.sleep_min_ms,
+                        sleep_max_ms=args.sleep_max_ms,
+                        burst_size=args.burst_size,
+                        burst_sleep_ms=args.burst_sleep_ms
                     ) for start_index, chunk in enumerate(url_chunks)]
                     completed = 0
                     for fut in as_completed(futures):
@@ -785,7 +888,10 @@ def main() -> int:
                     future_to_url = {executor.submit(_scrape_url_process_worker, 
                                                      url, idx, total, 
                                                      str(auth_file), args.headless, 
-                                                     args.skip_on_captcha, args.block_heavy, str(out_path)): (url, idx) 
+                                                     args.skip_on_captcha, args.block_heavy, str(out_path),
+                                                     randomize_ua=args.randomize_ua,
+                                                     auth_on_listings=args.auth_on_listings,
+                                                     captcha_retry=args.captcha_retry): (url, idx) 
                                      for idx, url in enumerate(urls, start=1)}
                     completed = 0
                     for future in as_completed(future_to_url):
