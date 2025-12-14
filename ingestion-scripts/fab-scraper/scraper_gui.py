@@ -65,6 +65,7 @@ class ScraperGUI:
         self.force_rescrape_var = tk.BooleanVar(value=False)
         self.new_browser_var = tk.BooleanVar(value=False)
         self.block_heavy_var = tk.BooleanVar(value=True)
+        self.reuse_browser_var = tk.BooleanVar(value=True)
         
         # Create checkboxes in a grid
         ttk.Checkbutton(flags_frame, text="Headless mode", variable=self.headless_var).grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
@@ -74,7 +75,8 @@ class ScraperGUI:
         ttk.Checkbutton(flags_frame, text="Skip pages with captchas", variable=self.skip_captcha_var).grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
         ttk.Checkbutton(flags_frame, text="Force rescrape all URLs", variable=self.force_rescrape_var).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
         ttk.Checkbutton(flags_frame, text="New browser per page (avoid captchas)", variable=self.new_browser_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-        ttk.Checkbutton(flags_frame, text="Block heavy resources (images/media/fonts/analytics)", variable=self.block_heavy_var).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(flags_frame, text="Reuse one browser per worker (new context per URL)", variable=self.reuse_browser_var).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(flags_frame, text="Block heavy resources (images/media/fonts/analytics)", variable=self.block_heavy_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
         
         # === SECTION 2: Parameters with Values ===
         params_frame = ttk.LabelFrame(main_frame, text="Parameters", padding="10")
@@ -216,6 +218,8 @@ class ScraperGUI:
             cmd.append("--new-browser-per-page")
         if self.block_heavy_var.get():
             cmd.append("--block-heavy")
+        if self.reuse_browser_var.get():
+            cmd.append("--reuse-browser")
         
         # Add parameters with values
         cmd.extend(["--max-scrolls", self.max_scrolls_var.get()])

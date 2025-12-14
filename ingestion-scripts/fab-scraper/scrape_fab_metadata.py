@@ -36,7 +36,7 @@ import time
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Iterable
 
 from playwright.sync_api import Browser, Page, Playwright, TimeoutError as PlaywrightTimeoutError, sync_playwright, Route, Request
 
@@ -446,6 +446,8 @@ def append_metadata_record(path: Path, record: Dict) -> None:
 def _scrape_url_process_worker(url: str, idx: int, total: int, 
                                 auth_file_path: str, headless: bool, 
                                 skip_on_captcha: bool, block_heavy: bool, out_path: str) -> bool:
+    """Legacy per-URL worker: launches a browser per page."""
+    
     """Worker function to scrape a single URL in a separate process.
     
     Returns True if successful, False otherwise.
@@ -534,6 +536,58 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
             time.sleep(PER_PAGE_SLEEP_SEC)
 
 
+def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
+                                auth_file_path: str, headless: bool,
+                                skip_on_captcha: bool, block_heavy: bool,
+                                out_path: str) -> int:
+    """Chunk worker: reuse one browser, new incognito context per URL.
+    Returns the number of successfully written records.
+    """
+    written = 0
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        try:
+            for offset, url in enumerate(urls, start=0):
+                idx = start_index + offset
+                print(f"Scraping {idx}/{total}: {url}")
+                context = None
+                page = None
+                try:
+                    context = browser.new_context(storage_state=auth_file_path)
+                    # Optional request blocking
+                    setup_request_blocking(context, block_heavy)
+                    page = context.new_page()
+                    data = scrape_listing(page, url, skip_on_captcha=skip_on_captcha)
+                    if data is None:
+                        debug(f"Skipped {url} (captcha or error)")
+                        continue
+                    # Fallback: add title if missing
+                    if not data.get("title"):
+                        try:
+                            data["title"] = (page.title() or "").strip() or None
+                        except Exception:
+                            pass
+                    append_metadata_record(Path(out_path), data)
+                    written += 1
+                    debug(f"Saved progress: {idx}/{total} completed")
+                except Exception as e:
+                    print(f"WARNING: Failed to scrape {url}: {e}", file=sys.stderr)
+                finally:
+                    try:
+                        if page:
+                            page.close()
+                        if context:
+                            context.close()
+                    except Exception:
+                        pass
+                    time.sleep(PER_PAGE_SLEEP_SEC)
+        finally:
+            try:
+                browser.close()
+            except Exception:
+                pass
+    return written
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scrape Fab Library metadata → fab_metadata.json")
     parser.add_argument("--headless", action="store_true", help="Run browser headless (default: False)")
@@ -550,6 +604,7 @@ def main() -> int:
     parser.add_argument("--new-browser-per-page", action="store_true", help="Open each URL in a fresh browser instance (avoids captchas on subsequent pages)")
     parser.add_argument("--parallel", type=int, default=1, help="Number of parallel browser instances to run (default: 1 = sequential)")
     parser.add_argument("--block-heavy", action="store_true", help="Block heavy resources (images, media, fonts) and common analytics domains to speed up loads")
+    parser.add_argument("--reuse-browser", action="store_true", help="Reuse a single browser per worker and create a fresh incognito context per URL (faster, reduces captchas vs new browser per page)")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -692,25 +747,55 @@ def main() -> int:
             except Exception:
                 pass
             
-            # Execute scraping in parallel using process pool
-            with ProcessPoolExecutor(max_workers=args.parallel) as executor:
-                # Submit all tasks
-                future_to_url = {executor.submit(_scrape_url_process_worker, 
-                                                 url, idx, total, 
-                                                 str(auth_file), args.headless, 
-                                                 args.skip_on_captcha, args.block_heavy, str(out_path)): (url, idx) 
-                                 for idx, url in enumerate(urls, start=1)}
-                
-                # Process results as they complete
-                completed = 0
-                for future in as_completed(future_to_url):
-                    completed += 1
-                    try:
-                        success = future.result()
-                        if success:
+            def chunked(seq: List[str], k: int) -> List[List[str]]:
+                n = len(seq)
+                if k <= 0:
+                    return [seq]
+                size = max(1, (n + k - 1) // k)
+                return [seq[i:i+size] for i in range(0, n, size)]
+            
+            # If reuse-browser, shard URLs into chunks per worker
+            if args.reuse_browser:
+                if args.new_browser_per_page:
+                    print("NOTE: --reuse-browser overrides --new-browser-per-page in parallel mode", file=sys.stderr)
+                url_chunks = chunked(urls, args.parallel)
+                with ProcessPoolExecutor(max_workers=args.parallel) as executor:
+                    futures = [executor.submit(
+                        _scrape_urls_process_worker,
+                        chunk,
+                        start_index+1,
+                        total,
+                        str(auth_file),
+                        args.headless,
+                        args.skip_on_captcha,
+                        args.block_heavy,
+                        str(out_path)
+                    ) for start_index, chunk in enumerate(url_chunks)]
+                    completed = 0
+                    for fut in as_completed(futures):
+                        try:
+                            cnt = fut.result()
+                            completed += cnt
                             debug(f"Saved progress: {completed}/{total} completed")
-                    except Exception as e:
-                        debug(f"Worker failed: {e}")
+                        except Exception as e:
+                            debug(f"Worker failed: {e}")
+            else:
+                # Per-URL process (old behavior)
+                with ProcessPoolExecutor(max_workers=args.parallel) as executor:
+                    future_to_url = {executor.submit(_scrape_url_process_worker, 
+                                                     url, idx, total, 
+                                                     str(auth_file), args.headless, 
+                                                     args.skip_on_captcha, args.block_heavy, str(out_path)): (url, idx) 
+                                     for idx, url in enumerate(urls, start=1)}
+                    completed = 0
+                    for future in as_completed(future_to_url):
+                        try:
+                            ok = future.result()
+                            if ok:
+                                completed += 1
+                                debug(f"Saved progress: {completed}/{total} completed")
+                        except Exception as e:
+                            debug(f"Worker failed: {e}")
         
         elif args.new_browser_per_page:
             # Close initial browser/context since we'll open fresh ones per URL
