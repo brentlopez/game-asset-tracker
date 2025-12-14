@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://game-asset-tracker.local/schemas/manifest.schema.json",
+  "title": "Game Asset Pack Manifest",
+  "description": "Schema for game asset pack manifests that define pack-level metadata and individual asset files for import into the Asset Tracking System",
+  "type": "object",
+  "required": ["pack_id", "pack_name", "root_path", "assets"],
+  "additionalProperties": false,
+  "properties": {
+    "pack_id": {
+      "type": "string",
+      "description": "Unique identifier for the asset pack (UUID format)",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "pack_name": {
+      "type": "string",
+      "description": "Human-readable name of the asset pack",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "root_path": {
+      "type": "string",
+      "description": "Absolute path to the pack's root directory on disk",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "description": "Origin of the pack (e.g., 'Unity Asset Store', 'Epic Marketplace', 'NAS')",
+      "maxLength": 255
+    },
+    "license_link": {
+      "type": "string",
+      "description": "URL or file path to license documentation",
+      "maxLength": 2048
+    },
+    "global_tags": {
+      "type": "array",
+      "description": "Tags applicable to the entire pack",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "uniqueItems": true
+    },
+    "assets": {
+      "type": "array",
+      "description": "Array of individual asset files within the pack",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["relative_path", "file_type", "size_bytes"],
+        "additionalProperties": false,
+        "properties": {
+          "relative_path": {
+            "type": "string",
+            "description": "Path relative to the pack's root_path",
+            "minLength": 1
+          },
+          "file_type": {
+            "type": "string",
+            "description": "File extension (e.g., 'png', 'wav', 'fbx')",
+            "pattern": "^[a-z0-9]+$",
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "size_bytes": {
+            "type": "integer",
+            "description": "File size in bytes",
+            "minimum": 0
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Flexible key-value pairs for file-specific metadata (e.g., dimensions, duration, poly_count)",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "local_tags": {
+            "type": "array",
+            "description": "Tags specific to this asset, often derived from folder structure",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

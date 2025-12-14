@@ -1,0 +1,64 @@
+{
+  "pack_id": "550e8400-e29b-41d4-a716-446655440000",
+  "pack_name": "Dragon Character Pack",
+  "root_path": "/Volumes/NAS/Assets/Unity/DragonPack",
+  "source": "Unity Asset Store",
+  "license_link": "https://assetstore.unity.com/packages/3d/characters/creatures/dragon-123456",
+  "global_tags": ["3d-models", "characters", "fantasy", "dragons"],
+  "assets": [
+    {
+      "relative_path": "Models/Dragon_Red.fbx",
+      "file_type": "fbx",
+      "size_bytes": 4567890,
+      "metadata": {
+        "poly_count": "15000",
+        "rigged": "true",
+        "animated": "false"
+      },
+      "local_tags": ["models", "red-dragon", "high-poly"]
+    },
+    {
+      "relative_path": "Textures/DragonSkin_Diffuse.png",
+      "file_type": "png",
+      "size_bytes": 2048000,
+      "metadata": {
+        "dimensions": "2048x2048",
+        "format": "RGBA",
+        "color_space": "sRGB"
+      },
+      "local_tags": ["textures", "diffuse", "pbr"]
+    },
+    {
+      "relative_path": "Textures/DragonSkin_Normal.png",
+      "file_type": "png",
+      "size_bytes": 2048000,
+      "metadata": {
+        "dimensions": "2048x2048",
+        "format": "RGB"
+      },
+      "local_tags": ["textures", "normal", "pbr"]
+    },
+    {
+      "relative_path": "Audio/DragonRoar.wav",
+      "file_type": "wav",
+      "size_bytes": 1234567,
+      "metadata": {
+        "duration": "3.5s",
+        "sample_rate": "44100",
+        "channels": "2"
+      },
+      "local_tags": ["audio", "sfx", "roar"]
+    },
+    {
+      "relative_path": "Animations/Dragon_Idle.fbx",
+      "file_type": "fbx",
+      "size_bytes": 456789,
+      "metadata": {
+        "duration": "2.0s",
+        "frame_rate": "30",
+        "bones": "42"
+      },
+      "local_tags": ["animations", "idle", "loop"]
+    }
+  ]
+}
