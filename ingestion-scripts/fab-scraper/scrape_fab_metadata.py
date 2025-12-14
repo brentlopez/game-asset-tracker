@@ -38,7 +38,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Set
 
-from playwright.sync_api import Browser, Page, Playwright, TimeoutError as PlaywrightTimeoutError, sync_playwright
+from playwright.sync_api import Browser, Page, Playwright, TimeoutError as PlaywrightTimeoutError, sync_playwright, Route, Request
 
 BASE_URL = "https://www.fab.com"
 LIBRARY_URL = f"{BASE_URL}/library"
@@ -362,6 +362,52 @@ def load_existing_metadata(path: Path) -> tuple[List[Dict], Set[str]]:
         return [], set()
 
 
+# ---------------------------- Request Blocking ----------------------------
+BLOCKED_RESOURCE_TYPES = {"image", "media", "font"}
+BLOCKED_ANALYTICS_SUBSTRINGS = [
+    "googletagmanager.com",
+    "google-analytics.com",
+    "doubleclick.net",
+    "facebook.net",
+    "segment.com",
+    "mixpanel.com",
+    "hotjar.com",
+    "clarity.ms",
+    "sentry.io",
+]
+
+def _should_block_request(req: Request, block_heavy: bool) -> bool:
+    if not block_heavy:
+        return False
+    try:
+        if req.resource_type in BLOCKED_RESOURCE_TYPES:
+            return True
+        url = (req.url or "").lower()
+        return any(s in url for s in BLOCKED_ANALYTICS_SUBSTRINGS)
+    except Exception:
+        return False
+
+
+def setup_request_blocking(context, block_heavy: bool) -> None:
+    if not block_heavy:
+        return
+    try:
+        def handler(route: Route, request: Request):
+            try:
+                if _should_block_request(request, block_heavy):
+                    return route.abort()
+                return route.continue_()
+            except Exception:
+                # In case of any issue, continue the request
+                try:
+                    route.continue_()
+                except Exception:
+                    pass
+        context.route("**/*", handler)
+    except Exception:
+        pass
+
+
 # Global lock for thread-safe file writes
 _file_write_lock = threading.Lock()
 
@@ -399,7 +445,7 @@ def append_metadata_record(path: Path, record: Dict) -> None:
 
 def _scrape_url_process_worker(url: str, idx: int, total: int, 
                                 auth_file_path: str, headless: bool, 
-                                skip_on_captcha: bool, out_path: str) -> bool:
+                                skip_on_captcha: bool, block_heavy: bool, out_path: str) -> bool:
     """Worker function to scrape a single URL in a separate process.
     
     Returns True if successful, False otherwise.
@@ -419,6 +465,12 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
             except Exception as e:
                 debug(f"Failed to create context with auth: {e}")
                 return False
+            
+            # Optional: block heavy resources in worker
+            try:
+                setup_request_blocking(per_page_context, block_heavy)
+            except Exception:
+                pass
             
             listing_page = per_page_context.new_page()
             data = scrape_listing(listing_page, url, skip_on_captcha=skip_on_captcha)
@@ -497,6 +549,7 @@ def main() -> int:
     parser.add_argument("--force-rescrape", action="store_true", help="Rescrape all URLs even if fab_id already exists in output file")
     parser.add_argument("--new-browser-per-page", action="store_true", help="Open each URL in a fresh browser instance (avoids captchas on subsequent pages)")
     parser.add_argument("--parallel", type=int, default=1, help="Number of parallel browser instances to run (default: 1 = sequential)")
+    parser.add_argument("--block-heavy", action="store_true", help="Block heavy resources (images, media, fonts) and common analytics domains to speed up loads")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -523,6 +576,8 @@ def main() -> int:
         browser = p.chromium.launch(headless=args.headless)
         try:
             context = browser.new_context(storage_state=str(auth_file))
+            # Optional: block heavy resources
+            setup_request_blocking(context, args.block_heavy)
         except Exception as e:
             browser.close()
             print(f"ERROR: Failed to load storage state from auth.json: {e}", file=sys.stderr)
@@ -643,7 +698,7 @@ def main() -> int:
                 future_to_url = {executor.submit(_scrape_url_process_worker, 
                                                  url, idx, total, 
                                                  str(auth_file), args.headless, 
-                                                 args.skip_on_captcha, str(out_path)): (url, idx) 
+                                                 args.skip_on_captcha, args.block_heavy, str(out_path)): (url, idx) 
                                  for idx, url in enumerate(urls, start=1)}
                 
                 # Process results as they complete
