@@ -69,6 +69,7 @@ class ScraperGUI:
         self.randomize_ua_var = tk.BooleanVar(value=True)
         self.auth_on_listings_var = tk.BooleanVar(value=False)
         self.captcha_retry_var = tk.BooleanVar(value=True)
+        self.measure_bytes_var = tk.BooleanVar(value=False)
         
         # Create checkboxes in a grid
         ttk.Checkbutton(flags_frame, text="Headless mode", variable=self.headless_var).grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
@@ -105,7 +106,6 @@ class ScraperGUI:
         # proxies
         self.proxy_file_var = tk.StringVar(value="")
         # measure bytes
-        self.measure_bytes_var = tk.BooleanVar(value=False)
         self.measure_report_var = tk.StringVar(value="fab_bandwidth_report.jsonl")
         
         # Create labeled inputs

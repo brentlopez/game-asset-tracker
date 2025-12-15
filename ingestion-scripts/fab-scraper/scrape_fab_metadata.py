@@ -29,6 +29,7 @@ Requirements:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import re
 import sys
@@ -479,6 +480,9 @@ class TrafficMeter:
         self._total = 0
         self._count = 0
         self._by_type: Dict[str, int] = {}
+        self._proxy_routed = 0  # bytes that would go through proxy
+        self._direct = 0  # bytes that would go direct
+        self._by_routing: Dict[str, int] = {}  # breakdown by routing decision
         self._lock = None  # single-threaded in worker; kept for future use
 
     def attach(self, context):
@@ -487,26 +491,78 @@ class TrafficMeter:
         try:
             def on_response(resp):
                 try:
-                    headers = resp.headers or {}
-                    clen = headers.get("content-length")
-                    if clen is None:
-                        return
-                    size = int(clen) if str(clen).isdigit() else 0
-                    self._total += max(0, size)
-                    self._count += 1
-                    rtype = getattr(resp.request, "resource_type", None) or "unknown"
-                    self._by_type[rtype] = self._by_type.get(rtype, 0) + max(0, size)
+                    # Try to get actual body size by reading the response
+                    size = 0
+                    try:
+                        body = resp.body()
+                        size = len(body) if body else 0
+                    except Exception:
+                        # Fallback to Content-Length header if body() fails
+                        headers = resp.headers or {}
+                        clen = headers.get("content-length")
+                        if clen and str(clen).isdigit():
+                            size = int(clen)
+                    
+                    if size > 0:
+                        self._total += size
+                        self._count += 1
+                        rtype = getattr(resp.request, "resource_type", None) or "unknown"
+                        self._by_type[rtype] = self._by_type.get(rtype, 0) + size
+                        
+                        # Determine if this would be routed through proxy
+                        url = resp.url.lower()
+                        needs_proxy = self._should_route_through_proxy(rtype, url)
+                        
+                        if needs_proxy:
+                            self._proxy_routed += size
+                            self._by_routing[f"proxy_{rtype}"] = self._by_routing.get(f"proxy_{rtype}", 0) + size
+                        else:
+                            self._direct += size
+                            self._by_routing[f"direct_{rtype}"] = self._by_routing.get(f"direct_{rtype}", 0) + size
                 except Exception:
                     pass
             context.on("response", on_response)
         except Exception:
             pass
+    
+    def _should_route_through_proxy(self, resource_type: str, url: str) -> bool:
+        """Determine if a request should be routed through proxy.
+        
+        Strategy: Only route requests that need authentication or geo-location.
+        - document (HTML): YES (needs auth/geo)
+        - xhr/fetch (API calls): YES (likely needs auth)
+        - script/stylesheet/font/image/media: NO (static CDN assets)
+        """
+        # Route through proxy: document HTML and API calls
+        if resource_type in {"document", "xhr", "fetch"}:
+            return True
+        
+        # Route through proxy if it's from the main domain (not CDN)
+        if "fab.com" in url and resource_type in {"script", "stylesheet"}:
+            # Check if it's from the main site or a CDN
+            if any(cdn in url for cdn in ["cdn", "static", "assets", "cloudfront", "akamai"]):
+                return False  # CDN assets go direct
+            return True  # Main site assets through proxy
+        
+        # Everything else goes direct (images, fonts, third-party scripts)
+        return False
 
     def snapshot_and_reset(self) -> Dict:
-        data = {"total_bytes": self._total, "requests": self._count, "by_type": dict(self._by_type)}
+        data = {
+            "total_bytes": self._total, 
+            "requests": self._count, 
+            "by_type": dict(self._by_type),
+            "proxy_routed_bytes": self._proxy_routed,
+            "direct_bytes": self._direct,
+            "by_routing": dict(self._by_routing),
+            "proxy_percentage": round(100 * self._proxy_routed / self._total, 1) if self._total > 0 else 0
+        }
         self._total = 0
         self._count = 0
         self._by_type = {}
+        self._proxy_routed = 0
+        self._direct = 0
+        self._by_routing = {}
         return data
 
 
@@ -551,8 +607,6 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
     
     Returns True if successful, False otherwise.
     """
-    import fcntl
-    
     with sync_playwright() as p:
         per_page_browser = None
         per_page_context = None
@@ -616,6 +670,10 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
                         "bytes": snap.get("total_bytes", 0),
                         "requests": snap.get("requests", 0),
                         "by_type": snap.get("by_type", {}),
+                        "proxy_routed_bytes": snap.get("proxy_routed_bytes", 0),
+                        "direct_bytes": snap.get("direct_bytes", 0),
+                        "by_routing": snap.get("by_routing", {}),
+                        "proxy_percentage": snap.get("proxy_percentage", 0),
                         "status": "skipped"
                     })
                 return False
@@ -726,6 +784,9 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                             ctx_kwargs["storage_state"] = auth_file_path
                         context = browser.new_context(**ctx_kwargs)
                         setup_request_blocking(context, block_heavy)
+                        # Create a fresh meter for the retry
+                        meter = TrafficMeter(enabled=measure_bytes)
+                        meter.attach(context)
                         page = context.new_page()
                         data = scrape_listing(page, url, skip_on_captcha=skip_on_captcha)
                         if measure_bytes and measure_report_path and data is None:
@@ -738,6 +799,10 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                                 "bytes": snap.get("total_bytes", 0),
                                 "requests": snap.get("requests", 0),
                                 "by_type": snap.get("by_type", {}),
+                                "proxy_routed_bytes": snap.get("proxy_routed_bytes", 0),
+                                "direct_bytes": snap.get("direct_bytes", 0),
+                                "by_routing": snap.get("by_routing", {}),
+                                "proxy_percentage": snap.get("proxy_percentage", 0),
                                 "status": "skipped"
                             })
                     if data is None:
@@ -762,6 +827,10 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                             "bytes": snap.get("total_bytes", 0),
                             "requests": snap.get("requests", 0),
                             "by_type": snap.get("by_type", {}),
+                            "proxy_routed_bytes": snap.get("proxy_routed_bytes", 0),
+                            "direct_bytes": snap.get("direct_bytes", 0),
+                            "by_routing": snap.get("by_routing", {}),
+                            "proxy_percentage": snap.get("proxy_percentage", 0),
                             "status": "ok"
                         })
                     # Cadence shaping
@@ -1077,10 +1146,34 @@ def main() -> int:
                         debug(f"Failed to create context with auth: {e}")
                         continue
                     
+                    # Apply request blocking if enabled
+                    setup_request_blocking(per_page_context, args.block_heavy)
+                    
+                    # Setup bandwidth measurement if enabled
+                    meter = TrafficMeter(enabled=args.measure_bytes)
+                    meter.attach(per_page_context)
+                    
                     listing_page = per_page_context.new_page()
                     data = scrape_listing(listing_page, url, skip_on_captcha=args.skip_on_captcha)
                     if data is None:
                         debug(f"Skipped {url} (captcha or error)")
+                        # Log bandwidth even for skipped pages
+                        if args.measure_bytes and args.measure_report:
+                            snap = meter.snapshot_and_reset()
+                            _append_jsonl(Path(args.measure_report), {
+                                "ts": datetime.utcnow().isoformat()+"Z",
+                                "url": url,
+                                "idx": idx,
+                                "total": total,
+                                "bytes": snap.get("total_bytes", 0),
+                                "requests": snap.get("requests", 0),
+                                "by_type": snap.get("by_type", {}),
+                                "proxy_routed_bytes": snap.get("proxy_routed_bytes", 0),
+                                "direct_bytes": snap.get("direct_bytes", 0),
+                                "by_routing": snap.get("by_routing", {}),
+                                "proxy_percentage": snap.get("proxy_percentage", 0),
+                                "status": "skipped"
+                            })
                         continue
                     # Fallback: if title is missing, try to read document.title
                     if not data.get("title"):
@@ -1092,6 +1185,23 @@ def main() -> int:
                     # Save incrementally after each successful scrape
                     save_metadata_incrementally(out_path, results)
                     debug(f"Saved progress: {len(results)} total records")
+                    # Log bandwidth if measurement enabled
+                    if args.measure_bytes and args.measure_report:
+                        snap = meter.snapshot_and_reset()
+                        _append_jsonl(Path(args.measure_report), {
+                            "ts": datetime.utcnow().isoformat()+"Z",
+                            "url": url,
+                            "idx": idx,
+                            "total": total,
+                            "bytes": snap.get("total_bytes", 0),
+                            "requests": snap.get("requests", 0),
+                            "by_type": snap.get("by_type", {}),
+                            "proxy_routed_bytes": snap.get("proxy_routed_bytes", 0),
+                            "direct_bytes": snap.get("direct_bytes", 0),
+                            "by_routing": snap.get("by_routing", {}),
+                            "proxy_percentage": snap.get("proxy_percentage", 0),
+                            "status": "ok"
+                        })
                 except Exception as e:
                     print(f"WARNING: Failed to scrape {url}: {e}", file=sys.stderr)
                 finally:
@@ -1108,6 +1218,10 @@ def main() -> int:
                     time.sleep(PER_PAGE_SLEEP_SEC)
         else:
             # Original mode: reuse same browser/context for all pages
+            # Setup bandwidth measurement for the shared context if enabled
+            meter = TrafficMeter(enabled=args.measure_bytes)
+            meter.attach(context)
+            
             for idx, url in enumerate(urls, start=1):
                 listing_page = context.new_page()
                 try:
@@ -1115,6 +1229,23 @@ def main() -> int:
                     data = scrape_listing(listing_page, url, skip_on_captcha=args.skip_on_captcha)
                     if data is None:
                         debug(f"Skipped {url} (captcha or error)")
+                        # Log bandwidth even for skipped pages
+                        if args.measure_bytes and args.measure_report:
+                            snap = meter.snapshot_and_reset()
+                            _append_jsonl(Path(args.measure_report), {
+                                "ts": datetime.utcnow().isoformat()+"Z",
+                                "url": url,
+                                "idx": idx,
+                                "total": total,
+                                "bytes": snap.get("total_bytes", 0),
+                                "requests": snap.get("requests", 0),
+                                "by_type": snap.get("by_type", {}),
+                                "proxy_routed_bytes": snap.get("proxy_routed_bytes", 0),
+                                "direct_bytes": snap.get("direct_bytes", 0),
+                                "by_routing": snap.get("by_routing", {}),
+                                "proxy_percentage": snap.get("proxy_percentage", 0),
+                                "status": "skipped"
+                            })
                         continue
                     # Fallback: if title is missing, try to read document.title
                     if not data.get("title"):
@@ -1126,6 +1257,23 @@ def main() -> int:
                     # Save incrementally after each successful scrape
                     save_metadata_incrementally(out_path, results)
                     debug(f"Saved progress: {len(results)} total records")
+                    # Log bandwidth if measurement enabled
+                    if args.measure_bytes and args.measure_report:
+                        snap = meter.snapshot_and_reset()
+                        _append_jsonl(Path(args.measure_report), {
+                            "ts": datetime.utcnow().isoformat()+"Z",
+                            "url": url,
+                            "idx": idx,
+                            "total": total,
+                            "bytes": snap.get("total_bytes", 0),
+                            "requests": snap.get("requests", 0),
+                            "by_type": snap.get("by_type", {}),
+                            "proxy_routed_bytes": snap.get("proxy_routed_bytes", 0),
+                            "direct_bytes": snap.get("direct_bytes", 0),
+                            "by_routing": snap.get("by_routing", {}),
+                            "proxy_percentage": snap.get("proxy_percentage", 0),
+                            "status": "ok"
+                        })
                 except Exception as e:
                     print(f"WARNING: Failed to scrape {url}: {e}", file=sys.stderr)
                 finally:
