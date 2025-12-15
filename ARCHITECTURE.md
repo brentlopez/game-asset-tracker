@@ -7,7 +7,7 @@ The Game Asset Tracking System is a hybrid solution for managing game developmen
 ## System Components
 
 ### 1. Ingestion Scripts (Python)
-- **Location:** `ingestion-scripts/`
+- **Location:** `ingestion/`
 - **Purpose:** Scan local NAS or folder structures and generate standardized JSON manifests
 - **Language:** Python 3.x
 - **Output:** JSON files conforming to the strict schema (see Data Model section)

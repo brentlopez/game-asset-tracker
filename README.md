@@ -27,7 +27,7 @@ game-asset-tracker/
 ├── README.md                # This file
 ├── .gitignore
 │
-├── ingestion-scripts/       # Python scripts for scanning assets
+├── ingestion/               # Python scripts for scanning assets
 │   └── (to be developed)
 │
 ├── obsidian-plugin/        # TypeScript plugin for Obsidian
@@ -82,7 +82,7 @@ All data flows through a well-defined JSON schema ensuring consistency and porta
 ## Documentation
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete system design, workflow, and data model (**start here**)
-- **ingestion-scripts/README.md** - Guide for running ingestion scripts (to be developed)
+- **ingestion/README.md** - Guide for ingestion systems (filesystem scanning and marketplace scraping)
 - **obsidian-plugin/README.md** - Plugin installation and usage (to be developed)
 - **schemas/** - Reference schemas and examples (to be developed)
 

@@ -47,7 +47,7 @@ Both ingestion scripts and the plugin MUST validate against this schema. See `sc
 ## Repository Structure
 
 ```
-ingestion-scripts/   # Python: Scans asset directories → generates validated JSON
+ingestion/           # Python: Scans asset directories → generates validated JSON
 obsidian-plugin/     # TypeScript: Validates & imports JSON → updates SQLite + creates Markdown
 schemas/             # THE CONTRACT: Formal JSON Schema + examples
   ├── manifest.schema.json   # JSON Schema (Draft 7) - strict validation rules
@@ -116,10 +116,10 @@ Since the project is scaffolded but not implemented, there are no build/test com
 Expected commands will likely be:
 ```bash
 # Run ingestion script
-python ingestion-scripts/ingest.py --path /path/to/assets --output output.json
+python ingestion/ingest.py --path /path/to/assets --output output.json
 
 # Install dependencies
-pip install -r ingestion-scripts/requirements.txt
+pip install -r ingestion/requirements.txt
 ```
 
 ### When Obsidian Plugin Is Implemented
