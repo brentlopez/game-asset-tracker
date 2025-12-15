@@ -23,7 +23,7 @@ import queue
 class ScraperGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Fab Metadata Scraper GUI")
+        self.root.title("Fab Metadata Tools")
         self.root.geometry("900x750")
         
         # Queue for thread-safe log updates
@@ -35,14 +35,15 @@ class ScraperGUI:
         self.total_urls = 0
         self.scraped_count = 0
         
-        # Script path
+        # Script paths
         self.script_path = Path(__file__).parent / "scrape_fab_metadata.py"
+        self.converter_path = Path(__file__).parent / "convert_html_to_markdown.py"
         
         self._setup_ui()
         self._start_log_updater()
     
     def _setup_ui(self):
-        """Create the UI layout"""
+        """Create the UI layout with tabs"""
         # Main container with padding
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -51,10 +52,31 @@ class ScraperGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(4, weight=1)  # Log area gets extra space
+        main_frame.rowconfigure(0, weight=1)
+        
+        # Create notebook (tabs)
+        notebook = ttk.Notebook(main_frame)
+        notebook.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Create tab frames
+        scraping_tab = ttk.Frame(notebook, padding="10")
+        postprocess_tab = ttk.Frame(notebook, padding="10")
+        
+        notebook.add(scraping_tab, text="Scraping")
+        notebook.add(postprocess_tab, text="Post-Processing")
+        
+        # Setup each tab
+        self._setup_scraping_tab(scraping_tab)
+        self._setup_postprocess_tab(postprocess_tab)
+    
+    def _setup_scraping_tab(self, parent):
+        """Setup the scraping tab UI"""
+        # Configure grid weights for the tab
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(4, weight=1)  # Log area gets extra space
         
         # === SECTION 1: Boolean Flags ===
-        flags_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
+        flags_frame = ttk.LabelFrame(parent, text="Options", padding="10")
         flags_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 10))
         
         # Boolean flag variables
@@ -88,7 +110,7 @@ class ScraperGUI:
         ttk.Checkbutton(flags_frame, text="Measure bytes (write JSONL report)", variable=self.measure_bytes_var).grid(row=9, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
         
         # === SECTION 2: Parameters with Values ===
-        params_frame = ttk.LabelFrame(main_frame, text="Parameters", padding="10")
+        params_frame = ttk.LabelFrame(parent, text="Parameters", padding="10")
         params_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 10))
         params_frame.columnconfigure(1, weight=1)
         
@@ -177,7 +199,7 @@ class ScraperGUI:
         ttk.Entry(params_frame, textvariable=self.burst_sleep_var, width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
         
         # === SECTION 3: Control Buttons ===
-        control_frame = ttk.Frame(main_frame)
+        control_frame = ttk.Frame(parent)
         control_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
         self.start_button = ttk.Button(control_frame, text="Start Scraping", command=self._start_scraping)
@@ -194,7 +216,7 @@ class ScraperGUI:
         self.status_label.pack(side=tk.LEFT, padx=20)
         
         # === SECTION 4: Progress Bar ===
-        progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding="10")
+        progress_frame = ttk.LabelFrame(parent, text="Progress", padding="10")
         progress_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         progress_frame.columnconfigure(0, weight=1)
         
@@ -208,7 +230,7 @@ class ScraperGUI:
         self.progress_label.grid(row=1, column=0, sticky=tk.W, padx=5)
         
         # === SECTION 5: Log Output ===
-        log_frame = ttk.LabelFrame(main_frame, text="Log Output", padding="10")
+        log_frame = ttk.LabelFrame(parent, text="Log Output", padding="10")
         log_frame.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 0))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
@@ -222,6 +244,78 @@ class ScraperGUI:
         self.log_text.tag_config("warning", foreground="orange")
         self.log_text.tag_config("success", foreground="green")
         self.log_text.tag_config("info", foreground="blue")
+    
+    def _setup_postprocess_tab(self, parent):
+        """Setup the post-processing tab UI"""
+        # Configure grid weights
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(3, weight=1)  # Log area gets extra space
+        
+        # === SECTION 1: File Selection ===
+        file_frame = ttk.LabelFrame(parent, text="Input/Output Files", padding="10")
+        file_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 10))
+        file_frame.columnconfigure(1, weight=1)
+        
+        # Input file
+        ttk.Label(file_frame, text="Input JSON file:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.convert_input_var = tk.StringVar(value="fab_metadata.json")
+        input_frame = ttk.Frame(file_frame)
+        input_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        input_frame.columnconfigure(0, weight=1)
+        ttk.Entry(input_frame, textvariable=self.convert_input_var).grid(row=0, column=0, sticky=(tk.W, tk.E))
+        ttk.Button(input_frame, text="Browse", command=self._browse_convert_input, width=8).grid(row=0, column=1, padx=(5, 0))
+        
+        # Output file
+        ttk.Label(file_frame, text="Output JSON file:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.convert_output_var = tk.StringVar(value="")
+        output_frame = ttk.Frame(file_frame)
+        output_frame.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        output_frame.columnconfigure(0, weight=1)
+        ttk.Entry(output_frame, textvariable=self.convert_output_var).grid(row=0, column=0, sticky=(tk.W, tk.E))
+        ttk.Button(output_frame, text="Browse", command=self._browse_convert_output, width=8).grid(row=0, column=1, padx=(5, 0))
+        ttk.Label(file_frame, text="(Leave empty to overwrite input file)", foreground="gray").grid(row=2, column=1, sticky=tk.W, padx=5)
+        
+        # === SECTION 2: Options ===
+        options_frame = ttk.LabelFrame(parent, text="Conversion Options", padding="10")
+        options_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 10))
+        
+        # Workers
+        ttk.Label(options_frame, text="Parallel workers:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.convert_workers_var = tk.StringVar(value="4")
+        worker_frame = ttk.Frame(options_frame)
+        worker_frame.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Entry(worker_frame, textvariable=self.convert_workers_var, width=10).pack(side=tk.LEFT)
+        ttk.Label(worker_frame, text="(More workers = faster conversion)", foreground="gray").pack(side=tk.LEFT, padx=(5, 0))
+        
+        # === SECTION 3: Control Buttons ===
+        control_frame = ttk.Frame(parent)
+        control_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        self.convert_button = ttk.Button(control_frame, text="Convert to Markdown", command=self._start_conversion)
+        self.convert_button.pack(side=tk.LEFT, padx=5)
+        
+        self.convert_clear_button = ttk.Button(control_frame, text="Clear Log", command=self._clear_convert_log)
+        self.convert_clear_button.pack(side=tk.LEFT, padx=5)
+        
+        # Status label
+        self.convert_status_label = ttk.Label(control_frame, text="Ready", foreground="green")
+        self.convert_status_label.pack(side=tk.LEFT, padx=20)
+        
+        # === SECTION 4: Log Output ===
+        log_frame = ttk.LabelFrame(parent, text="Conversion Log", padding="10")
+        log_frame.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 0))
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        
+        # Scrolled text for log output
+        self.convert_log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, height=20, state=tk.DISABLED)
+        self.convert_log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Configure text tags for colored output
+        self.convert_log_text.tag_config("error", foreground="red")
+        self.convert_log_text.tag_config("warning", foreground="orange")
+        self.convert_log_text.tag_config("success", foreground="green")
+        self.convert_log_text.tag_config("info", foreground="blue")
     
     def _browse_output_file(self):
         """Open file dialog for output file selection"""
@@ -254,6 +348,28 @@ class ScraperGUI:
         )
         if filename:
             self.proxy_file_var.set(Path(filename).name)
+    
+    def _browse_convert_input(self):
+        """Open file dialog for conversion input file"""
+        filename = filedialog.askopenfilename(
+            title="Select input JSON file",
+            initialdir=Path(__file__).parent,
+            initialfile=self.convert_input_var.get(),
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            self.convert_input_var.set(Path(filename).name)
+    
+    def _browse_convert_output(self):
+        """Open file dialog for conversion output file"""
+        filename = filedialog.asksaveasfilename(
+            title="Select output JSON file",
+            initialdir=Path(__file__).parent,
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            self.convert_output_var.set(Path(filename).name)
     
     def _build_command(self):
         """Build the command line arguments from GUI inputs"""
@@ -365,6 +481,12 @@ class ScraperGUI:
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
+    
+    def _clear_convert_log(self):
+        """Clear the conversion log text area"""
+        self.convert_log_text.config(state=tk.NORMAL)
+        self.convert_log_text.delete(1.0, tk.END)
+        self.convert_log_text.config(state=tk.DISABLED)
     
     def _start_scraping(self):
         """Start the scraping process in a background thread"""
@@ -670,6 +792,125 @@ class ScraperGUI:
                 self.progress_label.config(text=f"{current} / {total} pages scraped")
         
         self.root.after(0, update)
+    
+    def _log_convert(self, message, tag=None):
+        """Add message to conversion log (thread-safe)"""
+        def update():
+            self.convert_log_text.config(state=tk.NORMAL)
+            if tag:
+                self.convert_log_text.insert(tk.END, message + "\n", tag)
+            else:
+                self.convert_log_text.insert(tk.END, message + "\n")
+            self.convert_log_text.see(tk.END)
+            self.convert_log_text.config(state=tk.DISABLED)
+        
+        self.root.after(0, update)
+    
+    def _update_convert_status(self, text, color):
+        """Update conversion status label (thread-safe)"""
+        self.root.after(0, lambda: self.convert_status_label.config(text=text, foreground=color))
+    
+    def _start_conversion(self):
+        """Start the HTML to Markdown conversion process"""
+        # Validate inputs
+        try:
+            workers = int(self.convert_workers_var.get())
+            if workers < 1:
+                raise ValueError("Workers must be >= 1")
+        except ValueError as e:
+            self._log_convert(f"Error: {e}", "error")
+            return
+        
+        input_file = Path(self.script_path.parent) / self.convert_input_var.get()
+        if not input_file.exists():
+            self._log_convert(f"Error: Input file not found: {input_file}", "error")
+            return
+        
+        # Check if converter script exists
+        if not self.converter_path.exists():
+            self._log_convert(f"Error: Converter script not found at {self.converter_path}", "error")
+            return
+        
+        # Update UI state
+        self.convert_button.config(state=tk.DISABLED)
+        self._update_convert_status("Running...", "orange")
+        
+        # Build command
+        cmd = [sys.executable, str(self.converter_path), str(input_file)]
+        
+        # Add output file if specified
+        output_file_name = self.convert_output_var.get().strip()
+        if output_file_name:
+            output_file = Path(self.script_path.parent) / output_file_name
+            cmd.extend(["-o", str(output_file)])
+        
+        # Add workers
+        cmd.extend(["-w", str(workers)])
+        
+        self._log_convert("Starting conversion with command:", "info")
+        self._log_convert(" ".join(cmd), "info")
+        self._log_convert("-" * 80)
+        
+        # Start conversion in background thread
+        thread = threading.Thread(target=self._run_conversion, args=(cmd,), daemon=True)
+        thread.start()
+    
+    def _run_conversion(self, cmd):
+        """Run the conversion process and capture output"""
+        try:
+            # Start process with stdout/stderr capture
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                cwd=self.script_path.parent,
+                universal_newlines=True
+            )
+            
+            # Read output in real-time
+            while True:
+                # Check if process has finished
+                if process.poll() is not None:
+                    break
+                
+                # Read stderr (where progress messages go)
+                if process.stderr:
+                    line = process.stderr.readline()
+                    if line:
+                        self._log_convert(line.rstrip())
+            
+            # Read any remaining output
+            if process.stderr:
+                remaining_err = process.stderr.read()
+                if remaining_err:
+                    for line in remaining_err.splitlines():
+                        self._log_convert(line)
+            
+            if process.stdout:
+                remaining_out = process.stdout.read()
+                if remaining_out:
+                    for line in remaining_out.splitlines():
+                        self._log_convert(line)
+            
+            # Check exit code
+            exit_code = process.returncode
+            if exit_code == 0:
+                self._log_convert("-" * 80)
+                self._log_convert("Conversion completed successfully!", "success")
+                self._update_convert_status("Completed", "green")
+            else:
+                self._log_convert("-" * 80)
+                self._log_convert(f"Conversion failed with exit code {exit_code}", "error")
+                self._update_convert_status("Failed", "red")
+        
+        except Exception as e:
+            self._log_convert(f"Error running converter: {e}", "error")
+            self._update_convert_status("Error", "red")
+        
+        finally:
+            self.root.after(0, lambda: self.convert_button.config(state=tk.NORMAL))
 
 
 def main():
