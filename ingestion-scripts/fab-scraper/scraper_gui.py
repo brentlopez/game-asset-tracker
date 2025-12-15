@@ -15,6 +15,7 @@ from tkinter import ttk, filedialog, scrolledtext
 import subprocess
 import threading
 import sys
+import json
 from pathlib import Path
 import queue
 
@@ -307,6 +308,10 @@ class ScraperGUI:
         # Always add progress-newlines for GUI parsing
         cmd.append("--progress-newlines")
         
+        # Add progress file for reliable GUI monitoring
+        self.progress_file_path = self.script_path.parent / ".scraper_progress.json"
+        cmd.extend(["--progress-file", str(self.progress_file_path)])
+        
         return cmd
     
     def _log(self, message, tag=None):
@@ -334,6 +339,26 @@ class ScraperGUI:
     def _start_log_updater(self):
         """Start the periodic log updater"""
         self.root.after(100, self._update_log_from_queue)
+    
+    def _monitor_progress_file(self):
+        """Monitor progress file for updates"""
+        if self.is_running and hasattr(self, 'progress_file_path'):
+            try:
+                if self.progress_file_path.exists():
+                    with open(self.progress_file_path, 'r') as f:
+                        data = json.load(f)
+                        current = data.get('current', 0)
+                        total = data.get('total', 0)
+                        if total > 0:
+                            self.total_urls = total
+                            self.scraped_count = current
+                            self._update_progress(current, total)
+            except:
+                pass  # Silently ignore errors reading progress file
+        
+        # Schedule next check
+        if self.is_running:
+            self.root.after(200, self._monitor_progress_file)
     
     def _clear_log(self):
         """Clear the log text area"""
@@ -381,6 +406,9 @@ class ScraperGUI:
         self._log("Starting scraper with command:", "info")
         self._log(" ".join(cmd), "info")
         self._log("-" * 80)
+        
+        # Start progress file monitoring
+        self.root.after(200, self._monitor_progress_file)
         
         # Start scraping in background thread
         thread = threading.Thread(target=self._run_scraping, args=(cmd,), daemon=True)
@@ -547,6 +575,15 @@ class ScraperGUI:
         """Clean up after process finishes"""
         self.is_running = False
         self.process = None
+        
+        # Clean up progress file
+        if hasattr(self, 'progress_file_path'):
+            try:
+                if self.progress_file_path.exists():
+                    self.progress_file_path.unlink()
+            except:
+                pass
+        
         self.root.after(0, lambda: self.start_button.config(state=tk.NORMAL))
         self.root.after(0, lambda: self.stop_button.config(state=tk.DISABLED))
     
@@ -594,8 +631,9 @@ class ScraperGUI:
                     self.total_urls = total
                     self.scraped_count = current
                     self._update_progress(current, total)
-            except:
-                pass
+            except Exception as e:
+                # Debug: log parsing errors
+                self._log(f"Progress parse error: {e} for line: {line}", "warning")
         
         # Extract URL collection info
         # Pattern: "Collected 42 unique listing URLs."

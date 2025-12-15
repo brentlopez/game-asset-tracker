@@ -584,6 +584,21 @@ def _append_jsonl(path: Path, record: Dict) -> None:
         print(f"WARNING: Failed to append to {path}: {e}", file=sys.stderr)
 
 
+def _write_progress_file(path: str | None, current: int, total: int) -> None:
+    """Atomically write progress to file for GUI monitoring."""
+    if not path:
+        return
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump({"current": current, "total": total}, f)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass  # Silently fail to avoid breaking scraping
+
+
 def _proxy_to_playwright(proxy_url: str | None) -> dict | None:
     if not proxy_url:
         return None
@@ -915,6 +930,7 @@ def main() -> int:
     
     # Progress display
     parser.add_argument("--progress-newlines", action="store_true", help="Print progress on separate lines instead of updating in place (for GUI parsing)")
+    parser.add_argument("--progress-file", type=str, help="Write progress updates to this file (for GUI monitoring)")
     
     args = parser.parse_args()
 
@@ -1125,6 +1141,7 @@ def main() -> int:
                             cnt = fut.result()
                             completed += cnt
                             pct = round(100 * completed / total, 1)
+                            _write_progress_file(args.progress_file, completed, total)
                             if args.progress_newlines:
                                 print(f"Progress: {completed}/{total} ({pct}%) completed", file=sys.stderr)
                             else:
@@ -1157,6 +1174,7 @@ def main() -> int:
                             if ok:
                                 completed += 1
                             pct = round(100 * completed / total, 1)
+                            _write_progress_file(args.progress_file, completed, total)
                             if args.progress_newlines:
                                 print(f"Progress: {completed}/{total} ({pct}%) completed", file=sys.stderr)
                             else:
@@ -1235,6 +1253,7 @@ def main() -> int:
                     save_metadata_incrementally(out_path, results)
                     # Print progress update
                     pct = round(100 * len(results) / total, 1)
+                    _write_progress_file(args.progress_file, len(results), total)
                     if args.progress_newlines:
                         print(f"Progress: {len(results)}/{total} ({pct}%) completed", file=sys.stderr)
                     else:
@@ -1315,6 +1334,7 @@ def main() -> int:
                     save_metadata_incrementally(out_path, results)
                     # Print progress update
                     pct = round(100 * len(results) / total, 1)
+                    _write_progress_file(args.progress_file, len(results), total)
                     if args.progress_newlines:
                         print(f"Progress: {len(results)}/{total} ({pct}%) completed", file=sys.stderr)
                     else:
