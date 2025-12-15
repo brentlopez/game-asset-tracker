@@ -455,6 +455,9 @@ UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
 ]
 
+LOCALE_POOL = ["en-US", "en-GB", "en-CA"]
+TIMEZONE_POOL = ["America/New_York", "America/Los_Angeles", "America/Chicago", "America/Denver"]
+
 def _context_options(randomize_ua: bool) -> dict:
     opts: dict = {}
     if randomize_ua:
@@ -464,6 +467,9 @@ def _context_options(randomize_ua: bool) -> dict:
         w = 1200 + random.randint(-40, 40)
         h = 800 + random.randint(-30, 30)
         opts["viewport"] = {"width": max(1024, w), "height": max(700, h)}
+        # Randomize locale and timezone to vary fingerprint
+        opts["locale"] = random.choice(LOCALE_POOL)
+        opts["timezone_id"] = random.choice(TIMEZONE_POOL)
     return opts
 
 
@@ -615,7 +621,13 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
             print(f"Scraping {idx}/{total}: {url}")
             # Launch fresh browser for this worker
             pw_proxy = _proxy_to_playwright(proxy_url)
-            per_page_browser = p.chromium.launch(headless=headless, proxy=pw_proxy)
+            per_page_browser = p.chromium.launch(
+                headless=headless, 
+                proxy=pw_proxy,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                ]
+            )
             try:
                 ctx_kwargs = _context_options(randomize_ua)
                 if auth_on_listings:
@@ -750,7 +762,13 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
     written = 0
     with sync_playwright() as p:
         pw_proxy = _proxy_to_playwright(proxy_url)
-        browser = p.chromium.launch(headless=headless, proxy=pw_proxy)
+        browser = p.chromium.launch(
+            headless=headless, 
+            proxy=pw_proxy,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+            ]
+        )
         try:
             for offset, url in enumerate(urls, start=0):
                 idx = start_index + offset
@@ -916,7 +934,12 @@ def main() -> int:
     with sync_playwright() as p:
         browser: Browser
         # Use Chromium by default for compatibility; switch to Firefox/WebKit if needed
-        browser = p.chromium.launch(headless=args.headless)
+        browser = p.chromium.launch(
+            headless=args.headless,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+            ]
+        )
         try:
             context = browser.new_context(storage_state=str(auth_file))
             # Optional: block heavy resources
@@ -1139,9 +1162,16 @@ def main() -> int:
                 try:
                     print(f"Scraping {idx}/{total}: {url}")
                     # Launch fresh browser
-                    per_page_browser = p.chromium.launch(headless=args.headless)
+                    per_page_browser = p.chromium.launch(
+                        headless=args.headless,
+                        args=[
+                            '--disable-blink-features=AutomationControlled',
+                        ]
+                    )
                     try:
-                        per_page_context = per_page_browser.new_context(storage_state=str(auth_file))
+                        ctx_kwargs = _context_options(args.randomize_ua)
+                        ctx_kwargs["storage_state"] = str(auth_file)
+                        per_page_context = per_page_browser.new_context(**ctx_kwargs)
                     except Exception as e:
                         debug(f"Failed to create context with auth: {e}")
                         continue
