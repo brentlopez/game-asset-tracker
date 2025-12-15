@@ -1,0 +1,16 @@
+{
+  "platforms": [
+    {
+      "id": "fab",
+      "name": "Fab (Epic)",
+      "gui_module": "platforms.fab.gui",
+      "enabled": true
+    },
+    {
+      "id": "unity",
+      "name": "Unity Asset Store",
+      "gui_module": "platforms.unity.gui",
+      "enabled": true
+    }
+  ]
+}
