@@ -772,7 +772,12 @@ def _clear_log(tk_vars):
 def create_postprocessing_tab(parent, tk_vars):
     """Render Post-Processing tab content for HTML to Markdown conversion"""
     parent.columnconfigure(0, weight=1)
+    parent.columnconfigure(1, weight=1)
     parent.rowconfigure(3, weight=1)
+    
+    # Initialize preview state
+    tk_vars["preview_visible"] = False
+    tk_vars["preview_assets"] = []  # List of (title, fab_id) tuples
     
     # File Selection
     file_frame = ttk.LabelFrame(parent, text="Input/Output Files", padding="10")
@@ -820,6 +825,22 @@ def create_postprocessing_tab(parent, tk_vars):
     tk_vars["convert_status_label"] = ttk.Label(control_frame, text="Ready", foreground="green")
     tk_vars["convert_status_label"].pack(side=tk.LEFT, padx=20)
     
+    # Preview controls (right side of control frame)
+    preview_control_frame = ttk.Frame(control_frame)
+    preview_control_frame.pack(side=tk.RIGHT, padx=5)
+    
+    ttk.Label(preview_control_frame, text="Select an Asset:").pack(side=tk.LEFT, padx=(0, 5))
+    
+    tk_vars["preview_dropdown"] = ttk.Combobox(preview_control_frame, state="readonly", width=30)
+    tk_vars["preview_dropdown"].pack(side=tk.LEFT, padx=(0, 5))
+    tk_vars["preview_dropdown"].set("")
+    tk_vars["preview_dropdown"]["values"] = []
+    tk_vars["preview_dropdown"].bind("<<ComboboxSelected>>", lambda e: _on_asset_selected(tk_vars))
+    
+    tk_vars["preview_button"] = ttk.Button(preview_control_frame, text="Show Preview", 
+                                           command=lambda: _toggle_preview(tk_vars), state=tk.DISABLED)
+    tk_vars["preview_button"].pack(side=tk.LEFT, padx=(0, 5))
+    
     # Log Output
     log_frame = ttk.LabelFrame(parent, text="Conversion Log", padding="10")
     log_frame.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 0))
@@ -833,6 +854,33 @@ def create_postprocessing_tab(parent, tk_vars):
     tk_vars["convert_log"].tag_config("warning", foreground="orange")
     tk_vars["convert_log"].tag_config("success", foreground="green")
     tk_vars["convert_log"].tag_config("info", foreground="blue")
+    
+    # Preview Column (full height, initially hidden)
+    preview_frame = ttk.LabelFrame(parent, text="Markdown Preview", padding="10")
+    preview_frame.grid(row=0, column=1, rowspan=4, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(10, 0))
+    preview_frame.columnconfigure(0, weight=1)
+    preview_frame.rowconfigure(0, weight=1)
+    
+    tk_vars["preview_text"] = scrolledtext.ScrolledText(preview_frame, wrap=tk.WORD, height=20, 
+                                                        state=tk.DISABLED, width=60)
+    tk_vars["preview_text"].grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    
+    # Configure text tags for markdown formatting
+    tk_vars["preview_text"].tag_config("h1", font=("", 16, "bold"), spacing3=10)
+    tk_vars["preview_text"].tag_config("h2", font=("", 14, "bold"), spacing3=8)
+    tk_vars["preview_text"].tag_config("h3", font=("", 12, "bold"), spacing3=6)
+    tk_vars["preview_text"].tag_config("bold", font=("", 10, "bold"))
+    tk_vars["preview_text"].tag_config("italic", font=("", 10, "italic"))
+    tk_vars["preview_text"].tag_config("code", font=("Courier", 10), background="#f0f0f0")
+    tk_vars["preview_text"].tag_config("link", foreground="blue", underline=1)
+    tk_vars["preview_text"].tag_config("list", lmargin1=20, lmargin2=20)
+    
+    # Initially hide preview frame
+    preview_frame.grid_remove()
+    tk_vars["preview_frame"] = preview_frame
+    
+    # Try to populate dropdown from existing file
+    _try_populate_from_existing_file(tk_vars)
 
 
 def _browse_convert_input(tk_vars):
@@ -845,6 +893,8 @@ def _browse_convert_input(tk_vars):
     )
     if filename:
         tk_vars["convert_input"].set(Path(filename).name)
+        # Try to populate dropdown from selected file
+        _try_populate_from_existing_file(tk_vars)
 
 
 def _browse_convert_output(tk_vars):
@@ -857,6 +907,8 @@ def _browse_convert_output(tk_vars):
     )
     if filename:
         tk_vars["convert_output"].set(Path(filename).name)
+        # Try to populate dropdown from selected file if it exists
+        _try_populate_from_existing_file(tk_vars)
 
 
 def _start_conversion(tk_vars):
@@ -937,6 +989,12 @@ def _run_conversion(cmd, tk_vars):
             _log_convert("-" * 80, None, tk_vars)
             _log_convert("Conversion completed successfully!", "success", tk_vars)
             _update_convert_status("Completed", "green", tk_vars)
+            
+            # Populate asset dropdown for preview
+            output_file = tk_vars.get("convert_output", tk.StringVar()).get().strip()
+            input_file = tk_vars.get("convert_input", tk.StringVar()).get()
+            json_file = output_file if output_file else input_file
+            _populate_asset_dropdown(tk_vars, json_file)
         else:
             _log_convert("-" * 80, None, tk_vars)
             _log_convert(f"Conversion failed with exit code {exit_code}", "error", tk_vars)
@@ -978,3 +1036,215 @@ def _clear_convert_log(tk_vars):
         log.config(state=tk.NORMAL)
         log.delete(1.0, tk.END)
         log.config(state=tk.DISABLED)
+
+
+def _try_populate_from_existing_file(tk_vars):
+    """Try to populate dropdown from existing file (output or input)"""
+    output_file = tk_vars.get("convert_output", tk.StringVar()).get().strip()
+    input_file = tk_vars.get("convert_input", tk.StringVar()).get()
+    
+    # Try output file first, then input file
+    json_file = output_file if output_file else input_file
+    
+    if json_file:
+        json_path = Path(__file__).parent / json_file
+        if json_path.exists():
+            # Check if file has markdown descriptions
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    assets = json.load(f)
+                
+                if isinstance(assets, list) and len(assets) > 0:
+                    # Check if first asset has markdown (converted)
+                    first_asset = assets[0]
+                    if isinstance(first_asset, dict) and 'description' in first_asset:
+                        description = first_asset.get('description', '')
+                        # Check if description looks like markdown (has ## or # or **)
+                        if any(marker in description for marker in ['##', '# ', '**', '- ']):
+                            _populate_asset_dropdown(tk_vars, json_file)
+            except:
+                pass  # Silently fail, don't spam logs on tab load
+
+
+def _populate_asset_dropdown(tk_vars, json_file_path):
+    """Populate asset dropdown from JSON file"""
+    try:
+        json_path = Path(__file__).parent / json_file_path
+        
+        if not json_path.exists():
+            _log_convert(f"Warning: Cannot populate preview - file not found: {json_path}", "warning", tk_vars)
+            return
+        
+        with open(json_path, 'r', encoding='utf-8') as f:
+            assets = json.load(f)
+        
+        if not isinstance(assets, list):
+            _log_convert("Warning: Cannot populate preview - JSON is not an array", "warning", tk_vars)
+            return
+        
+        # Extract titles and store asset data
+        asset_titles = []
+        tk_vars["preview_assets"] = []
+        
+        for asset in assets:
+            if isinstance(asset, dict) and 'title' in asset:
+                title = asset['title']
+                fab_id = asset.get('fab_id', '')
+                asset_titles.append(title)
+                tk_vars["preview_assets"].append((title, fab_id, asset))
+        
+        if asset_titles:
+            tk_vars["preview_dropdown"]["values"] = asset_titles
+            _log_convert(f"Preview ready: Loaded {len(asset_titles)} assets", "success", tk_vars)
+        else:
+            _log_convert("Warning: No assets found in JSON file", "warning", tk_vars)
+    
+    except json.JSONDecodeError as e:
+        _log_convert(f"Error: Invalid JSON in {json_file_path}: {e}", "error", tk_vars)
+    except Exception as e:
+        _log_convert(f"Error loading assets for preview: {e}", "error", tk_vars)
+
+
+def _toggle_preview(tk_vars):
+    """Toggle preview column visibility"""
+    preview_frame = tk_vars.get("preview_frame")
+    preview_button = tk_vars.get("preview_button")
+    
+    if not preview_frame or not preview_button:
+        return
+    
+    if tk_vars["preview_visible"]:
+        # Hide preview
+        preview_frame.grid_remove()
+        preview_button.config(text="Show Preview")
+        tk_vars["preview_visible"] = False
+    else:
+        # Show preview
+        preview_frame.grid()
+        preview_button.config(text="Hide Preview")
+        tk_vars["preview_visible"] = True
+        
+        # Render current selection if any
+        _on_asset_selected(tk_vars)
+
+
+def _on_asset_selected(tk_vars):
+    """Handle asset selection from dropdown"""
+    dropdown = tk_vars.get("preview_dropdown")
+    preview_button = tk_vars.get("preview_button")
+    
+    if not dropdown:
+        return
+    
+    selected_title = dropdown.get()
+    
+    if selected_title:
+        # Enable preview button
+        if preview_button:
+            preview_button.config(state=tk.NORMAL)
+        
+        # Render preview if visible
+        if tk_vars.get("preview_visible", False):
+            _render_markdown_preview(tk_vars, selected_title)
+
+
+def _render_markdown_preview(tk_vars, selected_title):
+    """Render markdown preview for selected asset"""
+    preview_text = tk_vars.get("preview_text")
+    
+    if not preview_text:
+        return
+    
+    # Find asset data
+    asset_data = None
+    for title, fab_id, data in tk_vars.get("preview_assets", []):
+        if title == selected_title:
+            asset_data = data
+            break
+    
+    if not asset_data:
+        return
+    
+    # Clear preview
+    preview_text.config(state=tk.NORMAL)
+    preview_text.delete(1.0, tk.END)
+    
+    # Get markdown description
+    description = asset_data.get('description', '')
+    
+    if not description:
+        preview_text.insert(tk.END, "No description available for this asset.")
+        preview_text.config(state=tk.DISABLED)
+        return
+    
+    # Parse and format markdown
+    _parse_and_format_markdown(preview_text, description)
+    
+    preview_text.config(state=tk.DISABLED)
+
+
+def _parse_and_format_markdown(text_widget, markdown_text):
+    """Parse markdown and insert formatted text into widget"""
+    if not markdown_text:
+        return
+    
+    lines = markdown_text.split('\n')
+    
+    for line in lines:
+        # Skip empty lines
+        if not line.strip():
+            text_widget.insert(tk.END, '\n')
+            continue
+        
+        # Headings
+        if line.startswith('### '):
+            text_widget.insert(tk.END, line[4:] + '\n', 'h3')
+        elif line.startswith('## '):
+            text_widget.insert(tk.END, line[3:] + '\n', 'h2')
+        elif line.startswith('# '):
+            text_widget.insert(tk.END, line[2:] + '\n', 'h1')
+        # Lists
+        elif line.strip().startswith(('- ', '* ', '1. ', '2. ', '3. ', '4. ', '5. ', '6. ', '7. ', '8. ', '9. ')):
+            _format_inline_text(text_widget, line, 'list')
+            text_widget.insert(tk.END, '\n')
+        # Regular text
+        else:
+            _format_inline_text(text_widget, line, None)
+            text_widget.insert(tk.END, '\n')
+
+
+def _format_inline_text(text_widget, line, base_tag=None):
+    """Format inline markdown (bold, italic, links, code)"""
+    import re
+    
+    pos = 0
+    
+    # Pattern for inline formatting: **bold**, *italic*, `code`, [text](url)
+    pattern = r'(\*\*.*?\*\*|\*.*?\*|`.*?`|\[.*?\]\(.*?\))'
+    
+    parts = re.split(pattern, line)
+    
+    for part in parts:
+        if not part:
+            continue
+        
+        tags = [base_tag] if base_tag else []
+        
+        # Bold
+        if part.startswith('**') and part.endswith('**') and len(part) > 4:
+            text_widget.insert(tk.END, part[2:-2], ('bold',) + tuple(tags) if tags else 'bold')
+        # Italic
+        elif part.startswith('*') and part.endswith('*') and len(part) > 2 and not part.startswith('**'):
+            text_widget.insert(tk.END, part[1:-1], ('italic',) + tuple(tags) if tags else 'italic')
+        # Code
+        elif part.startswith('`') and part.endswith('`') and len(part) > 2:
+            text_widget.insert(tk.END, part[1:-1], ('code',) + tuple(tags) if tags else 'code')
+        # Links [text](url)
+        elif part.startswith('[') and '](' in part and part.endswith(')'):
+            match = re.match(r'\[(.+?)\]\((.+?)\)', part)
+            if match:
+                link_text, url = match.groups()
+                text_widget.insert(tk.END, link_text, ('link',) + tuple(tags) if tags else 'link')
+        # Plain text
+        else:
+            text_widget.insert(tk.END, part, tuple(tags) if tags else ())
