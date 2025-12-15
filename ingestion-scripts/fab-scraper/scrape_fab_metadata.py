@@ -606,7 +606,8 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
                                 *, randomize_ua: bool = False, auth_on_listings: bool = False,
                                 captcha_retry: bool = False, sleep_cfg: dict | None = None,
                                 proxy_url: str | None = None,
-                                measure_bytes: bool = False, measure_report_path: str | None = None) -> bool:
+                                measure_bytes: bool = False, measure_report_path: str | None = None,
+                                quiet: bool = False) -> bool:
     """Legacy per-URL worker: launches a browser per page."""
     
     """Worker function to scrape a single URL in a separate process.
@@ -618,7 +619,8 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
         per_page_context = None
         listing_page = None
         try:
-            print(f"Scraping {idx}/{total}: {url}")
+            if not quiet:
+                print(f"Scraping {idx}/{total}: {url}")
             # Launch fresh browser for this worker
             pw_proxy = _proxy_to_playwright(proxy_url)
             per_page_browser = p.chromium.launch(
@@ -755,7 +757,8 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                                 sleep_max_ms: int = 800, burst_size: int = 5,
                                 burst_sleep_ms: int = 3000,
                                 proxy_url: str | None = None,
-                                measure_bytes: bool = False, measure_report_path: str | None = None) -> int:
+                                measure_bytes: bool = False, measure_report_path: str | None = None,
+                                quiet: bool = False) -> int:
     """Chunk worker: reuse one browser, new incognito context per URL.
     Returns the number of successfully written records.
     """
@@ -772,7 +775,8 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
         try:
             for offset, url in enumerate(urls, start=0):
                 idx = start_index + offset
-                print(f"Scraping {idx}/{total}: {url}")
+                if not quiet:
+                    print(f"Scraping {idx}/{total}: {url}")
                 context = None
                 page = None
                 try:
@@ -1107,7 +1111,8 @@ def main() -> int:
                             burst_sleep_ms=args.burst_sleep_ms,
                             proxy_url=proxy_url,
                             measure_bytes=args.measure_bytes,
-                            measure_report_path=args.measure_report
+                            measure_report_path=args.measure_report,
+                            quiet=True
                         ))
                         url_offset += len(chunk)  # Move offset forward for next chunk
                     completed = 0
@@ -1115,9 +1120,11 @@ def main() -> int:
                         try:
                             cnt = fut.result()
                             completed += cnt
-                            debug(f"Saved progress: {completed}/{total} completed")
+                            pct = round(100 * completed / total, 1)
+                            print(f"\rProgress: {completed}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
                         except Exception as e:
-                            debug(f"Worker failed: {e}")
+                            print(f"\nWorker failed: {e}", file=sys.stderr)
+                    print("", file=sys.stderr)  # Final newline
             else:
                 # Per-URL process (old behavior)
                 with ProcessPoolExecutor(max_workers=args.parallel) as executor:
@@ -1133,7 +1140,8 @@ def main() -> int:
                                               captcha_retry=args.captcha_retry,
                                               proxy_url=proxy_url,
                                               measure_bytes=args.measure_bytes,
-                                              measure_report_path=args.measure_report)
+                                              measure_report_path=args.measure_report,
+                                              quiet=True)
                         future_to_url[fut] = (url, idx)
                     completed = 0
                     for future in as_completed(future_to_url):
@@ -1141,9 +1149,11 @@ def main() -> int:
                             ok = future.result()
                             if ok:
                                 completed += 1
-                                debug(f"Saved progress: {completed}/{total} completed")
+                            pct = round(100 * completed / total, 1)
+                            print(f"\rProgress: {completed}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
                         except Exception as e:
-                            debug(f"Worker failed: {e}")
+                            print(f"\nWorker failed: {e}", file=sys.stderr)
+                    print("", file=sys.stderr)  # Final newline
         
         elif args.new_browser_per_page:
             # Close initial browser/context since we'll open fresh ones per URL
