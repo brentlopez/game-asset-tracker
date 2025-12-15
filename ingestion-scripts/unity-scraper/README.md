@@ -1,72 +1,117 @@
 # Unity Asset Store Metadata Scraper
 
-This script scrapes metadata from your "My Assets" page on the Unity Asset Store.
+A tool for scraping and processing metadata from Unity Asset Store listings in your "My Assets" library.
 
-## Prerequisites
+## Overview
 
-1. **Python 3.7+** installed
-2. **Playwright** and its browser binaries installed
-3. **Valid authentication** saved in `auth.json`
+This project extracts metadata from your Unity Asset Store assets, including:
+- Asset titles and descriptions
+- Keywords/tags
+- License information
+- Asset Store IDs and URLs
 
-## Setup
+The scraper uses Playwright browser automation to navigate your "My Assets" page and extract metadata from each asset's detail page.
 
-### 1. Install Dependencies
+## Quick Start
+
+### 1. Setup & Authentication
+
+First, authenticate with Unity Asset Store:
 
 ```bash
-pip3 install -r requirements.txt
+cd setup
+python3 generate_unity_auth.py
 ```
 
-### 2. Install Playwright Browsers
+This will launch a browser where you can log in. Your session will be saved to `setup/auth.json`.
+
+**See [setup/README.md](setup/README.md) for detailed authentication instructions.**
+
+### 2. Scrape Metadata
 
 ```bash
-python3 -m playwright install
-```
-
-### 3. Generate Authentication File
-
-You must create an `auth.json` file containing valid Unity Asset Store login credentials.
-
-**Run this command to generate `auth.json`:**
-
-```bash
-python3 -m playwright codegen --save-storage=auth.json https://assetstore.unity.com/account/assets
-```
-
-This will:
-1. Open a browser window
-2. Navigate to the Unity Asset Store "My Assets" page
-3. **You must log in manually** in the browser
-4. Once logged in and on the "My Assets" page, **close the browser window**
-5. Your authentication cookies will be saved to `auth.json`
-
-**⚠️ Important:** 
-- Do NOT commit `auth.json` to version control (it contains your login session)
-- `auth.json` expires after some time - regenerate it if the scraper fails with authentication errors
-
-## Usage
-
-### Run the Scraper
-
-```bash
+cd scraping
 python3 scrape_unity_metadata.py
 ```
 
-**What it does:**
-1. Loads authentication from `auth.json`
-2. Navigates to your "My Assets" page
-3. Iterates through all pages of assets
-4. For each asset:
-   - Opens the asset modal
-   - Extracts the detail page URL
-   - Opens the detail page in a new tab
-   - Scrapes metadata (title, description, keywords, license)
-   - Closes the tab and modal
-5. Handles pagination automatically
-6. Outputs results to `unity_metadata.json`
+The scraper will process all assets in your library and save results to `output/unity_metadata.json`.
 
-### Output Format
+**See [scraping/README.md](scraping/README.md) for detailed scraping documentation.**
 
-The script generates `unity_metadata.json` containing an array of asset objects:
+## Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         WORKFLOW                            │
+└─────────────────────────────────────────────────────────────┘
+
+1. SETUP & AUTHENTICATION (setup/)
+   └─→ generate_unity_auth.py (interactive login)
+         ↓
+   auth.json created
+
+2. SCRAPING (scraping/)
+   ├─→ Load auth from setup/auth.json
+   ├─→ Navigate to "My Assets" page
+   ├─→ Iterate through all pages
+   ├─→ Extract metadata from each asset
+   └─→ Save to output/unity_metadata.json
+
+3. POST-PROCESSING (post_processing/)
+   └─→ [Future] HTML to Markdown conversion
+
+4. OUTPUT (output/)
+   └─→ unity_metadata.json (metadata export)
+```
+
+## Project Structure
+
+```
+unity-scraper/
+├── README.md                # This file
+├── setup/                   # Authentication
+│   ├── README.md
+│   ├── generate_unity_auth.py
+│   └── auth.json            # Your auth state (gitignored)
+├── scraping/                # Main scraping functionality
+│   ├── README.md
+│   └── scrape_unity_metadata.py
+├── post_processing/         # Future: HTML to Markdown conversion
+│   └── README.md
+├── output/                  # Generated files
+│   └── unity_metadata.json
+└── docs/                    # Future: GUI documentation
+    └── README.md
+```
+
+## Features
+
+### Current
+- **Modal-based navigation** - Maintains pagination state while scraping
+- **Robust selectors** - Multiple fallback strategies for reliability
+- **Error handling** - Individual failures don't stop the scraper
+- **Automatic pagination** - Handles multi-page asset libraries
+
+### Planned
+- **GUI interface** - Similar to fab-scraper with progress tracking
+- **Parallel execution** - Faster scraping with multiple workers
+- **HTML to Markdown** - Clean description formatting
+- **Resume capability** - Skip already-scraped assets
+- **Command-line options** - Headless mode, output path, etc.
+
+## Requirements
+
+- Python 3.7+
+- Playwright (for browser automation)
+
+```bash
+pip install playwright
+python3 -m playwright install
+```
+
+## Output Format
+
+The scraper generates JSON with this structure:
 
 ```json
 [
@@ -77,79 +122,57 @@ The script generates `unity_metadata.json` containing an array of asset objects:
     "keywords": ["3D", "Characters", "Fantasy", "Dragons"],
     "license_text": "Standard Unity Asset Store License",
     "original_url": "https://assetstore.unity.com/packages/3d/characters/fantasy-dragon-pack-12345"
-  },
-  ...
+  }
 ]
 ```
 
-### Headless Mode
+## Performance
 
-To run without opening a visible browser window, edit `scrape_unity_metadata.py`:
+- **Per asset**: ~1-2 seconds (requires full page load)
+- **100 assets**: ~3-5 minutes
+- **Large libraries**: Consider running overnight
 
-```python
-browser = p.chromium.launch(headless=True)  # Change False to True
-```
+The modal-based approach is necessary to maintain pagination state but requires individual page loads.
+
+## Documentation
+
+- **[Setup & Authentication](setup/README.md)** - How to authenticate with Unity Asset Store
+- **[Scraping Guide](scraping/README.md)** - Command-line usage and technical details
+- **[Post-Processing](post_processing/README.md)** - Future HTML to Markdown conversion
+- **[GUI Documentation](docs/README.md)** - Future GUI user guide
 
 ## Troubleshooting
 
-### "auth.json not found"
-Run the codegen command again to generate a new authentication file.
+### Common Issues
 
-### "Could not find assets"
-Your `auth.json` may have expired. Regenerate it using the codegen command.
+**auth.json not found**
+- Run setup first: `cd setup && python3 generate_unity_auth.py`
+- See [setup/README.md](setup/README.md)
 
-### Script hangs or crashes
-- Check your internet connection
-- The Unity Asset Store website may have changed its structure
+**Could not find assets**
+- Your `auth.json` may have expired
+- Regenerate using the setup script
+- Make sure you're logged in to Unity Asset Store
+
+**Slow performance**
+- This is expected - each asset requires a full page load
+- For large libraries, let it run overnight
+- Future: Parallel execution support
+
+**Script hangs**
 - Try running in non-headless mode to see what's happening
-- Check if you have many assets (hundreds) - this will take time
+- Check internet connection
+- Website structure may have changed
 
-### Slow performance
-- Each asset requires opening a detail page, which takes 1-2 seconds
-- For 100 assets, expect 3-5 minutes of runtime
-- This is necessary to avoid losing pagination state
+## Integration
 
-## Technical Details
-
-### Navigation Strategy
-
-The scraper uses a **modal-based approach** to avoid losing pagination state:
-
-1. Stay on the main "My Assets" list page
-2. Click asset name → opens modal
-3. Extract detail URL from "View Full Details" link (without clicking)
-4. Open detail URL in new tab/page
-5. Scrape metadata
-6. Close tab
-7. Close modal
-8. Continue to next asset
-
-This ensures we never navigate away from the paginated list.
-
-### Selectors
-
-The script uses multiple fallback strategies for robustness:
-
-- **Asset links:** `[data-test="package-name"]`
-- **Modal title:** `#quick-look-title`
-- **Description:** `#collapse-panel-description`
-- **Keywords:** Heading "Related keywords" + sibling links (with XPath fallback)
-- **License:** CSS selector (brittle) with text search fallback
-- **Pagination:** `nav[role="navigation"]` button with name "Next"
-
-### Error Handling
-
-- Individual asset failures don't stop the scraper
-- Modal close failures trigger Escape key as fallback
-- Missing data fields are set to empty strings/arrays
-- Progress messages logged to stderr, JSON output to stdout (if redirected)
-
-## Integration with Main Ingestion Pipeline
-
-This scraper is independent from the main `ingest.py` script. The output `unity_metadata.json` can be:
-
+This scraper is part of the Game Asset Tracking System. The output can be:
 1. Manually reviewed for completeness
 2. Merged with filesystem-scanned data (future feature)
 3. Used to enrich Asset Pack manifests with Unity-specific metadata
 
-See the main project `ARCHITECTURE.md` for the complete data flow.
+See the main project documentation for the complete data flow.
+
+## License
+
+This tool is for personal use with your own Unity Asset Store library. Respect Unity's terms of service.

@@ -124,9 +124,11 @@ def scrape_unity_assets():
     Main scraping function.
     """
     # Check for auth.json
-    auth_file = Path("auth.json")
+    script_dir = Path(__file__).resolve().parent
+    auth_file = script_dir.parent / "setup" / "auth.json"
     if not auth_file.exists():
-        print("Error: auth.json not found. Please run playwright codegen first.", file=sys.stderr)
+        print(f"Error: auth.json not found at {auth_file}", file=sys.stderr)
+        print("Please run: cd setup && python3 generate_unity_auth.py", file=sys.stderr)
         sys.exit(1)
     
     assets_data = []
@@ -136,7 +138,7 @@ def scrape_unity_assets():
         browser = p.chromium.launch(headless=False)  # Set to True for headless mode
         
         # Load authentication state
-        context = browser.new_context(storage_state="auth.json")
+        context = browser.new_context(storage_state=str(auth_file))
         main_page = context.new_page()
         
         print("Navigating to My Assets page...", file=sys.stderr)
@@ -286,7 +288,7 @@ def scrape_unity_assets():
         browser.close()
     
     # Write output
-    output_file = Path("unity_metadata.json")
+    output_file = script_dir.parent / "output" / "unity_metadata.json"
     print(f"\nWriting {len(assets_data)} assets to {output_file}", file=sys.stderr)
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(assets_data, f, indent=2, ensure_ascii=False)
