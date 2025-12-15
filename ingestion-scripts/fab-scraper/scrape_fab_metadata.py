@@ -259,8 +259,70 @@ def wait_for_captcha_solve(page: Page, timeout_sec: int = CAPTCHA_WAIT_TIMEOUT_S
     return False
 
 
-def scrape_listing(page: Page, url: str, skip_on_captcha: bool = False) -> Dict | None:
-    page.goto(url, wait_until="domcontentloaded")
+def scrape_listing_with_retry(page: Page, url: str, skip_on_captcha: bool = False, 
+                               max_retries: int = 3, initial_timeout_ms: int = 30000) -> Dict | None:
+    """Scrape with exponential backoff retry on timeout.
+    
+    Retries with increasing timeouts:
+    - Attempt 1: 30s timeout
+    - Attempt 2: 60s timeout  
+    - Attempt 3: 120s timeout
+    - Attempt 4: 240s timeout (4 minutes)
+    Maximum timeout capped at 300s (5 minutes)
+    
+    Args:
+        page: Playwright page object
+        url: URL to scrape
+        skip_on_captcha: Whether to skip pages with captcha
+        max_retries: Number of retry attempts (default 3)
+        initial_timeout_ms: Initial timeout in milliseconds (default 30s)
+    
+    Returns:
+        Dict with scraped data or None if all attempts fail
+    """
+    MAX_TIMEOUT_MS = 300000  # 5 minutes maximum
+    
+    for attempt in range(max_retries + 1):
+        # Exponential backoff: double timeout each attempt
+        timeout_ms = min(initial_timeout_ms * (2 ** attempt), MAX_TIMEOUT_MS)
+        
+        if attempt > 0:
+            debug(f"Retry {attempt}/{max_retries} for {url} with {timeout_ms/1000:.0f}s timeout")
+        
+        result = scrape_listing(page, url, skip_on_captcha=skip_on_captcha, timeout_ms=timeout_ms)
+        
+        if result is not None:
+            return result
+        
+        # If this was the last attempt, give up
+        if attempt == max_retries:
+            debug(f"All {max_retries + 1} attempts failed for {url}, giving up")
+            return None
+        
+        # Brief pause before retry
+        time.sleep(2)
+    
+    return None
+
+
+def scrape_listing(page: Page, url: str, skip_on_captcha: bool = False, timeout_ms: int = 30000) -> Dict | None:
+    """Scrape a single listing page with timeout.
+    
+    Args:
+        page: Playwright page object
+        url: URL to scrape
+        skip_on_captcha: Whether to skip pages with captcha
+        timeout_ms: Timeout for page.goto in milliseconds
+    
+    Returns:
+        Dict with scraped data or None on failure
+    """
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        debug(f"Timeout loading {url} after {timeout_ms}ms")
+        return None
+    
     # Give SPA content a moment
     wait_network_idle_if_possible(page)
 
@@ -664,7 +726,7 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
             meter.attach(per_page_context)
 
             listing_page = per_page_context.new_page()
-            data = scrape_listing(listing_page, url, skip_on_captcha=skip_on_captcha)
+            data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=skip_on_captcha)
             if data is None and captcha_retry:
                 # backoff, swap UA, retry once
                 time.sleep(2.0)
@@ -683,7 +745,7 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
                     per_page_context = per_page_browser.new_context(**ctx_kwargs)
                     setup_request_blocking(per_page_context, block_heavy)
                     listing_page = per_page_context.new_page()
-                    data = scrape_listing(listing_page, url, skip_on_captcha=skip_on_captcha)
+                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=skip_on_captcha)
                 except Exception:
                     data = None
             if data is None:
@@ -804,7 +866,7 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                     meter = TrafficMeter(enabled=measure_bytes)
                     meter.attach(context)
                     page = context.new_page()
-                    data = scrape_listing(page, url, skip_on_captcha=skip_on_captcha)
+                    data = scrape_listing_with_retry(page, url, skip_on_captcha=skip_on_captcha)
                     if data is None and captcha_retry:
                         # backoff and swap UA, retry once
                         time.sleep(2.0)
@@ -825,7 +887,7 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                         meter = TrafficMeter(enabled=measure_bytes)
                         meter.attach(context)
                         page = context.new_page()
-                        data = scrape_listing(page, url, skip_on_captcha=skip_on_captcha)
+                        data = scrape_listing_with_retry(page, url, skip_on_captcha=skip_on_captcha)
                         if measure_bytes and measure_report_path and data is None:
                             snap = meter.snapshot_and_reset()
                             _append_jsonl(Path(measure_report_path), {
@@ -1221,7 +1283,7 @@ def main() -> int:
                     meter.attach(per_page_context)
                     
                     listing_page = per_page_context.new_page()
-                    data = scrape_listing(listing_page, url, skip_on_captcha=args.skip_on_captcha)
+                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=args.skip_on_captcha)
                     if data is None:
                         debug(f"Skipped {url} (captcha or error)")
                         # Log bandwidth even for skipped pages
@@ -1302,7 +1364,7 @@ def main() -> int:
                 listing_page = context.new_page()
                 try:
                     print(f"Scraping {idx}/{total}: {url}")
-                    data = scrape_listing(listing_page, url, skip_on_captcha=args.skip_on_captcha)
+                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=args.skip_on_captcha)
                     if data is None:
                         debug(f"Skipped {url} (captcha or error)")
                         # Log bandwidth even for skipped pages
