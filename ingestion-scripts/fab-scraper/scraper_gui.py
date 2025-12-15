@@ -83,6 +83,7 @@ class ScraperGUI:
         ttk.Checkbutton(flags_frame, text="Use auth on listing pages (normally off)", variable=self.auth_on_listings_var).grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
         ttk.Checkbutton(flags_frame, text="Captcha backoff + retry once", variable=self.captcha_retry_var).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
         ttk.Checkbutton(flags_frame, text="Block heavy resources (images/media/fonts/analytics)", variable=self.block_heavy_var).grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(flags_frame, text="Measure bytes (write JSONL report)", variable=self.measure_bytes_var).grid(row=9, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
         
         # === SECTION 2: Parameters with Values ===
         params_frame = ttk.LabelFrame(main_frame, text="Parameters", padding="10")
@@ -103,6 +104,9 @@ class ScraperGUI:
         self.burst_sleep_var = tk.StringVar(value="3000")
         # proxies
         self.proxy_file_var = tk.StringVar(value="")
+        # measure bytes
+        self.measure_bytes_var = tk.BooleanVar(value=False)
+        self.measure_report_var = tk.StringVar(value="fab_bandwidth_report.jsonl")
         
         # Create labeled inputs
         row = 0
@@ -148,6 +152,14 @@ class ScraperGUI:
         proxy_frame.columnconfigure(0, weight=1)
         ttk.Entry(proxy_frame, textvariable=self.proxy_file_var).grid(row=0, column=0, sticky=(tk.W, tk.E))
         ttk.Button(proxy_frame, text="Browse", command=self._browse_proxy_file, width=8).grid(row=0, column=1, padx=(5, 0))
+        
+        # Measure report path
+        row += 1
+        ttk.Label(params_frame, text="Measure report (JSONL):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        meas_frame = ttk.Frame(params_frame)
+        meas_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        meas_frame.columnconfigure(0, weight=1)
+        ttk.Entry(meas_frame, textvariable=self.measure_report_var).grid(row=0, column=0, sticky=(tk.W, tk.E))
         
         # Cadence inputs
         row += 1
@@ -271,6 +283,11 @@ class ScraperGUI:
             cmd.append("--auth-on-listings")
         if self.captcha_retry_var.get():
             cmd.append("--captcha-retry")
+        # measurement
+        if self.measure_bytes_var.get():
+            cmd.append("--measure-bytes")
+            if self.measure_report_var.get().strip():
+                cmd.extend(["--measure-report", self.measure_report_var.get().strip()])
         # cadence
         cmd.extend(["--sleep-min-ms", self.sleep_min_var.get()])
         cmd.extend(["--sleep-max-ms", self.sleep_max_var.get()])

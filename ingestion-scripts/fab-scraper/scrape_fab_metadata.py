@@ -37,6 +37,7 @@ import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import random
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Set, Iterable
 
@@ -472,6 +473,55 @@ def _per_page_sleep(args, page_index: int):
         time.sleep(max(0, args.burst_sleep_ms) / 1000.0)
 
 
+class TrafficMeter:
+    def __init__(self, enabled: bool = False):
+        self.enabled = enabled
+        self._total = 0
+        self._count = 0
+        self._by_type: Dict[str, int] = {}
+        self._lock = None  # single-threaded in worker; kept for future use
+
+    def attach(self, context):
+        if not self.enabled:
+            return
+        try:
+            def on_response(resp):
+                try:
+                    headers = resp.headers or {}
+                    clen = headers.get("content-length")
+                    if clen is None:
+                        return
+                    size = int(clen) if str(clen).isdigit() else 0
+                    self._total += max(0, size)
+                    self._count += 1
+                    rtype = getattr(resp.request, "resource_type", None) or "unknown"
+                    self._by_type[rtype] = self._by_type.get(rtype, 0) + max(0, size)
+                except Exception:
+                    pass
+            context.on("response", on_response)
+        except Exception:
+            pass
+
+    def snapshot_and_reset(self) -> Dict:
+        data = {"total_bytes": self._total, "requests": self._count, "by_type": dict(self._by_type)}
+        self._total = 0
+        self._count = 0
+        self._by_type = {}
+        return data
+
+
+def _append_jsonl(path: Path, record: Dict) -> None:
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except Exception as e:
+        print(f"WARNING: Failed to append to {path}: {e}", file=sys.stderr)
+
+
 def _proxy_to_playwright(proxy_url: str | None) -> dict | None:
     if not proxy_url:
         return None
@@ -493,7 +543,8 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
                                 skip_on_captcha: bool, block_heavy: bool, out_path: str,
                                 *, randomize_ua: bool = False, auth_on_listings: bool = False,
                                 captcha_retry: bool = False, sleep_cfg: dict | None = None,
-                                proxy_url: str | None = None) -> bool:
+                                proxy_url: str | None = None,
+                                measure_bytes: bool = False, measure_report_path: str | None = None) -> bool:
     """Legacy per-URL worker: launches a browser per page."""
     
     """Worker function to scrape a single URL in a separate process.
@@ -526,6 +577,9 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
             except Exception:
                 pass
             
+            meter = TrafficMeter(enabled=measure_bytes)
+            meter.attach(per_page_context)
+
             listing_page = per_page_context.new_page()
             data = scrape_listing(listing_page, url, skip_on_captcha=skip_on_captcha)
             if data is None and captcha_retry:
@@ -551,6 +605,19 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
                     data = None
             if data is None:
                 debug(f"Skipped {url} (captcha or error)")
+                # still record bytes for this attempt if measuring
+                if measure_bytes and measure_report_path:
+                    snap = meter.snapshot_and_reset()
+                    _append_jsonl(Path(measure_report_path), {
+                        "ts": datetime.utcnow().isoformat()+"Z",
+                        "url": url,
+                        "idx": idx,
+                        "total": total,
+                        "bytes": snap.get("total_bytes", 0),
+                        "requests": snap.get("requests", 0),
+                        "by_type": snap.get("by_type", {}),
+                        "status": "skipped"
+                    })
                 return False
             
             # Fallback: if title is missing, try to read document.title
@@ -617,7 +684,8 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                                 captcha_retry: bool = False, sleep_min_ms: int = 300,
                                 sleep_max_ms: int = 800, burst_size: int = 5,
                                 burst_sleep_ms: int = 3000,
-                                proxy_url: str | None = None) -> int:
+                                proxy_url: str | None = None,
+                                measure_bytes: bool = False, measure_report_path: str | None = None) -> int:
     """Chunk worker: reuse one browser, new incognito context per URL.
     Returns the number of successfully written records.
     """
@@ -638,6 +706,8 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                     context = browser.new_context(**ctx_kwargs)
                     # Optional request blocking
                     setup_request_blocking(context, block_heavy)
+                    meter = TrafficMeter(enabled=measure_bytes)
+                    meter.attach(context)
                     page = context.new_page()
                     data = scrape_listing(page, url, skip_on_captcha=skip_on_captcha)
                     if data is None and captcha_retry:
@@ -658,6 +728,18 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                         setup_request_blocking(context, block_heavy)
                         page = context.new_page()
                         data = scrape_listing(page, url, skip_on_captcha=skip_on_captcha)
+                        if measure_bytes and measure_report_path and data is None:
+                            snap = meter.snapshot_and_reset()
+                            _append_jsonl(Path(measure_report_path), {
+                                "ts": datetime.utcnow().isoformat()+"Z",
+                                "url": url,
+                                "idx": idx,
+                                "total": total,
+                                "bytes": snap.get("total_bytes", 0),
+                                "requests": snap.get("requests", 0),
+                                "by_type": snap.get("by_type", {}),
+                                "status": "skipped"
+                            })
                     if data is None:
                         debug(f"Skipped {url} (captcha or error)")
                         continue
@@ -670,6 +752,18 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                     append_metadata_record(Path(out_path), data)
                     written += 1
                     debug(f"Saved progress: {idx}/{total} completed")
+                    if measure_bytes and measure_report_path:
+                        snap = meter.snapshot_and_reset()
+                        _append_jsonl(Path(measure_report_path), {
+                            "ts": datetime.utcnow().isoformat()+"Z",
+                            "url": url,
+                            "idx": idx,
+                            "total": total,
+                            "bytes": snap.get("total_bytes", 0),
+                            "requests": snap.get("requests", 0),
+                            "by_type": snap.get("by_type", {}),
+                            "status": "ok"
+                        })
                     # Cadence shaping
                     ms = random.randint(max(0, sleep_min_ms), max(sleep_min_ms, sleep_max_ms))
                     time.sleep(ms/1000.0)
@@ -722,6 +816,10 @@ def main() -> int:
     parser.add_argument("--burst-size", type=int, default=5, help="After this many pages, insert a longer burst sleep (default: 5)")
     parser.add_argument("--burst-sleep-ms", type=int, default=3000, help="Burst sleep duration in ms (default: 3000)")
     parser.add_argument("--captcha-retry", action="store_true", help="If a listing triggers captcha (skipped), retry once with backoff and UA switch")
+
+    # Traffic metering
+    parser.add_argument("--measure-bytes", action="store_true", help="Measure total bytes per listing (based on response Content-Length) and write JSONL report")
+    parser.add_argument("--measure-report", type=str, default="fab_bandwidth_report.jsonl", help="Path to JSONL report file (default: fab_bandwidth_report.jsonl)")
 
     # Proxies
     parser.add_argument("--proxy", action="append", default=[], help="Proxy server URL, e.g. http://user:pass@host:port (can be repeated)")
@@ -917,7 +1015,9 @@ def main() -> int:
                             sleep_max_ms=args.sleep_max_ms,
                             burst_size=args.burst_size,
                             burst_sleep_ms=args.burst_sleep_ms,
-                            proxy_url=proxy_url
+                            proxy_url=proxy_url,
+                            measure_bytes=args.measure_bytes,
+                            measure_report_path=args.measure_report
                         ))
                     completed = 0
                     for fut in as_completed(futures):
@@ -940,7 +1040,9 @@ def main() -> int:
                                               randomize_ua=args.randomize_ua,
                                               auth_on_listings=args.auth_on_listings,
                                               captcha_retry=args.captcha_retry,
-                                              proxy_url=proxy_url)
+                                              proxy_url=proxy_url,
+                                              measure_bytes=args.measure_bytes,
+                                              measure_report_path=args.measure_report)
                         future_to_url[fut] = (url, idx)
                     completed = 0
                     for future in as_completed(future_to_url):
