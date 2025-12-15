@@ -171,6 +171,13 @@ class AssetScraperGUI:
 def main():
     root = tk.Tk()
     app = AssetScraperGUI(root)
+    
+    # Bring window to front on macOS
+    root.lift()
+    root.attributes('-topmost', True)
+    root.after_idle(root.attributes, '-topmost', False)
+    root.focus_force()
+    
     root.mainloop()
 
 
