@@ -838,7 +838,7 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                             pass
                     append_metadata_record(Path(out_path), data)
                     written += 1
-                    debug(f"Saved progress: {idx}/{total} completed")
+                    # Progress reporting handled by main process in parallel mode
                     if measure_bytes and measure_report_path:
                         snap = meter.snapshot_and_reset()
                         _append_jsonl(Path(measure_report_path), {
@@ -1223,7 +1223,9 @@ def main() -> int:
                     results.append(data)
                     # Save incrementally after each successful scrape
                     save_metadata_incrementally(out_path, results)
-                    debug(f"Saved progress: {len(results)} total records")
+                    # Print progress update
+                    pct = round(100 * len(results) / total, 1)
+                    print(f"\rProgress: {len(results)}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
                     # Log bandwidth if measurement enabled
                     if args.measure_bytes and args.measure_report:
                         snap = meter.snapshot_and_reset()
@@ -1255,6 +1257,9 @@ def main() -> int:
                     except Exception:
                         pass
                     time.sleep(PER_PAGE_SLEEP_SEC)
+            
+            # Final newline after progress bar
+            print("", file=sys.stderr)
         else:
             # Original mode: reuse same browser/context for all pages
             # Setup bandwidth measurement for the shared context if enabled
@@ -1295,7 +1300,9 @@ def main() -> int:
                     results.append(data)
                     # Save incrementally after each successful scrape
                     save_metadata_incrementally(out_path, results)
-                    debug(f"Saved progress: {len(results)} total records")
+                    # Print progress update
+                    pct = round(100 * len(results) / total, 1)
+                    print(f"\rProgress: {len(results)}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
                     # Log bandwidth if measurement enabled
                     if args.measure_bytes and args.measure_report:
                         snap = meter.snapshot_and_reset()
@@ -1322,6 +1329,9 @@ def main() -> int:
                         pass
                     time.sleep(PER_PAGE_SLEEP_SEC)
 
+            # Final newline after progress bar
+            print("", file=sys.stderr)
+            
             try:
                 context.close()
                 browser.close()
