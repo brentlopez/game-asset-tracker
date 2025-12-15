@@ -4,7 +4,14 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-This is the Python ingestion script component of the Game Asset Tracking System. It scans asset directories (e.g., on a NAS or local filesystem) and generates standardized JSON manifests that describe Asset Packs and their individual files.
+This directory contains ingestion scripts for the Game Asset Tracking System. There are two main components:
+
+1. **`ingest.py`** - Generic asset pack ingestion script that scans local directories
+2. **`fab-scraper/`** - Specialized scraper for Fab.com (Unreal Engine Marketplace)
+
+### Generic Ingestion Script (`ingest.py`)
+
+Scans asset directories (e.g., on a NAS or local filesystem) and generates standardized JSON manifests that describe Asset Packs and their individual files.
 
 **Role in the larger system:** This script is the first step in a one-way data flow:
 ```
@@ -15,7 +22,43 @@ JSON Manifest (strict schema)
 Obsidian Plugin (creates SQLite index + Markdown notes)
 ```
 
+### Fab Scraper (`fab-scraper/`)
+
+A comprehensive web scraper for extracting metadata from Fab.com listings. **See `fab-scraper/README.md` for complete documentation.**
+
+Organized into workflow phases:
+- `setup/` - Authentication with Fab.com
+- `scraping/` - Main scraper with parallel execution support
+- `post_processing/` - HTML to Markdown conversion
+- `output/` - Generated metadata files
+- `docs/` - GUI documentation
+
+The fab-scraper has its own detailed WARP guidance at `fab-scraper/WARP.md` (if needed in the future).
+
+## Repository Structure
+
+```
+ingestion-scripts/
+├── ingest.py              # Generic asset pack ingestion
+├── requirements.txt       # Dependencies for ingest.py
+├── README.md              # Documentation for ingest.py
+├── WARP.md                # This file
+├── fab-scraper/           # Fab.com scraper (organized by workflow)
+│   ├── scraper_gui.py     # Main GUI entry point
+│   ├── README.md          # Project overview
+│   ├── setup/             # Authentication scripts
+│   ├── scraping/          # Main scraper with parallel support
+│   ├── post_processing/   # HTML to Markdown conversion
+│   ├── output/            # Generated files (gitignored)
+│   └── docs/              # GUI documentation
+└── unity-scraper/         # (If exists) Unity Asset Store scraper
+```
+
+**Important:** When working with fab-scraper, note that it has been recently reorganized (December 2024) from a flat structure to a workflow-based directory organization. All paths in code have been updated accordingly.
+
 ## Development Commands
+
+### For Generic Ingestion Script (`ingest.py`)
 
 ### Setup
 ```bash
@@ -85,7 +128,7 @@ Currently no automated tests exist. Manual testing approach:
 3. Check that local_tags are correctly derived from folder structure
 4. Verify audio metadata extraction (if mutagen installed)
 
-## Architecture
+## Architecture (Generic Ingestion Script)
 
 ### Core Concepts
 
@@ -130,7 +173,7 @@ This creates a searchable taxonomy without manual tagging.
    - For audio files: calls `extract_audio_metadata()` if mutagen available
 5. JSON output sent to stdout (progress/errors to stderr)
 
-## JSON Schema Reference
+## JSON Schema Reference (Generic Ingestion Script)
 
 The script MUST generate JSON conforming to this schema:
 
@@ -168,7 +211,7 @@ The script MUST generate JSON conforming to this schema:
 - `assets[].metadata`: Optional object, all values must be strings
 - `assets[].local_tags`: Optional array, unique items, each tag 1-100 chars
 
-## Design Constraints
+## Design Constraints (Generic Ingestion Script)
 
 1. **Output to stdout, logs to stderr** - JSON goes to stdout so it can be piped; all progress/errors go to stderr
 2. **No reverse sync** - This is one-way: filesystem → JSON only
@@ -177,7 +220,7 @@ The script MUST generate JSON conforming to this schema:
 5. **Only save valid JSON** - If validation fails, log errors and exit with non-zero status
 6. **Filesystem is source of truth** - JSON can be regenerated anytime
 
-## Common Development Tasks
+## Common Development Tasks (Generic Ingestion Script)
 
 ### Adding Support for New File Types
 
@@ -202,7 +245,7 @@ Possible enhancements:
 3. Include in manifest dict structure
 4. Update README.md examples
 
-## Important Implementation Notes
+## Important Implementation Notes (Generic Ingestion Script)
 
 ### Current State (December 2024)
 The script currently does NOT implement schema validation. This is a **critical missing feature** that must be added:
@@ -225,7 +268,7 @@ except jsonschema.ValidationError as e:
 The formal schema is at: `../schemas/manifest.schema.json`
 Validation examples at: `../schemas/README.md`
 
-## Technology Stack
+## Technology Stack (Generic Ingestion Script)
 
 - **Python:** 3.7+
 - **Required dependencies:** jsonschema (for validation)
