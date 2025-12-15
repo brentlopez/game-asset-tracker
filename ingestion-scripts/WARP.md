@@ -4,10 +4,11 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-This directory contains ingestion scripts for the Game Asset Tracking System. There are two main components:
+This directory contains ingestion scripts for the Game Asset Tracking System. There are three main components:
 
 1. **`ingest.py`** - Generic asset pack ingestion script that scans local directories
 2. **`fab-scraper/`** - Specialized scraper for Fab.com (Unreal Engine Marketplace)
+3. **`unity-scraper/`** - Specialized scraper for Unity Asset Store
 
 ### Generic Ingestion Script (`ingest.py`)
 
@@ -35,6 +36,17 @@ Organized into workflow phases:
 
 The fab-scraper has its own detailed WARP guidance at `fab-scraper/WARP.md` (if needed in the future).
 
+### Unity Scraper (`unity-scraper/`)
+
+A web scraper for extracting metadata from Unity Asset Store listings in your "My Assets" library. **See `unity-scraper/README.md` for complete documentation.**
+
+Organized into workflow phases (same structure as fab-scraper):
+- `setup/` - Authentication with Unity Asset Store
+- `scraping/` - Main scraper using modal-based navigation
+- `post_processing/` - Reserved for future HTML to Markdown conversion
+- `output/` - Generated metadata files
+- `docs/` - Reserved for future GUI documentation
+
 ## Repository Structure
 
 ```
@@ -51,10 +63,16 @@ ingestion-scripts/
 │   ├── post_processing/   # HTML to Markdown conversion
 │   ├── output/            # Generated files (gitignored)
 │   └── docs/              # GUI documentation
-└── unity-scraper/         # (If exists) Unity Asset Store scraper
+└── unity-scraper/         # Unity Asset Store scraper (organized by workflow)
+    ├── README.md          # Project overview
+    ├── setup/             # Authentication scripts
+    ├── scraping/          # Main scraper with modal navigation
+    ├── post_processing/   # Future: HTML to Markdown conversion
+    ├── output/            # Generated files (gitignored)
+    └── docs/              # Future: GUI documentation
 ```
 
-**Important:** When working with fab-scraper, note that it has been recently reorganized (December 2024) from a flat structure to a workflow-based directory organization. All paths in code have been updated accordingly.
+**Important:** Both fab-scraper and unity-scraper have been recently reorganized (December 2024) from flat structures to workflow-based directory organizations. All paths in code have been updated accordingly. Both projects now follow the same consistent structure.
 
 ## Development Commands
 
