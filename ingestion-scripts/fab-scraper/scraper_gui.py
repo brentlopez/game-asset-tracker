@@ -36,8 +36,8 @@ class ScraperGUI:
         self.scraped_count = 0
         
         # Script paths
-        self.script_path = Path(__file__).parent / "scrape_fab_metadata.py"
-        self.converter_path = Path(__file__).parent / "convert_html_to_markdown.py"
+        self.script_path = Path(__file__).parent / "scraping" / "scrape_fab_metadata.py"
+        self.converter_path = Path(__file__).parent / "post_processing" / "convert_html_to_markdown.py"
         
         self._setup_ui()
         self._start_log_updater()
@@ -119,8 +119,8 @@ class ScraperGUI:
         self.scroll_step_var = tk.StringVar(value="1200")
         self.scroll_steps_var = tk.StringVar(value="8")
         self.parallel_var = tk.StringVar(value="1")
-        self.out_file_var = tk.StringVar(value="fab_metadata.json")
-        self.url_file_var = tk.StringVar(value="fab_library_urls.json")
+        self.out_file_var = tk.StringVar(value="output/fab_metadata.json")
+        self.url_file_var = tk.StringVar(value="setup/fab_library_urls.json")
         # cadence
         self.sleep_min_var = tk.StringVar(value="300")
         self.sleep_max_var = tk.StringVar(value="800")
@@ -129,7 +129,7 @@ class ScraperGUI:
         # proxies
         self.proxy_file_var = tk.StringVar(value="")
         # measure bytes
-        self.measure_report_var = tk.StringVar(value="fab_bandwidth_report.jsonl")
+        self.measure_report_var = tk.StringVar(value="output/fab_bandwidth_report.jsonl")
         
         # Create labeled inputs
         row = 0
@@ -258,7 +258,7 @@ class ScraperGUI:
         
         # Input file
         ttk.Label(file_frame, text="Input JSON file:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.convert_input_var = tk.StringVar(value="fab_metadata.json")
+        self.convert_input_var = tk.StringVar(value="output/fab_metadata.json")
         input_frame = ttk.Frame(file_frame)
         input_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         input_frame.columnconfigure(0, weight=1)

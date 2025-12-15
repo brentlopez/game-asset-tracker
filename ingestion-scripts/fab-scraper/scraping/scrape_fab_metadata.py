@@ -959,12 +959,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Scrape Fab Library metadata → fab_metadata.json")
     parser.add_argument("--headless", action="store_true", help="Run browser headless (default: False)")
     parser.add_argument("--max-scrolls", type=int, default=MAX_SCROLLS, help="Safety limit for infinite scroll attempts (default: 50)")
-    parser.add_argument("--out", type=str, default="fab_metadata.json", help="Output JSON filename (default: fab_metadata.json)")
+    parser.add_argument("--out", type=str, default="../output/fab_metadata.json", help="Output JSON filename (default: ../output/fab_metadata.json)")
     parser.add_argument("--clear-cache", action="store_true", help="Delete existing output file before scraping")
     parser.add_argument("--scroll-step", type=int, default=SCROLL_STEP_PX, help="Pixels per incremental scroll (default: 1200)")
     parser.add_argument("--scroll-steps", type=int, default=SCROLL_STEPS_PER_ROUND, help="Incremental scroll steps per round (default: 8)")
     parser.add_argument("--test-scroll", action="store_true", help="Only test infinite scroll on the library page and report counts; do not scrape listings or write output")
-    parser.add_argument("--use-url-file", type=str, default="fab_library_urls.json", help="Load URLs from this JSON file instead of scraping the library page (default: fab_library_urls.json)")
+    parser.add_argument("--use-url-file", type=str, default="../setup/fab_library_urls.json", help="Load URLs from this JSON file instead of scraping the library page (default: ../setup/fab_library_urls.json)")
     parser.add_argument("--skip-library-scrape", action="store_true", help="Skip library page scraping and use URLs from --use-url-file instead")
     parser.add_argument("--skip-on-captcha", action="store_true", help="Skip pages with captchas instead of waiting for manual solve")
     parser.add_argument("--force-rescrape", action="store_true", help="Rescrape all URLs even if fab_id already exists in output file")
@@ -984,7 +984,7 @@ def main() -> int:
 
     # Traffic metering
     parser.add_argument("--measure-bytes", action="store_true", help="Measure total bytes per listing (based on response Content-Length) and write JSONL report")
-    parser.add_argument("--measure-report", type=str, default="fab_bandwidth_report.jsonl", help="Path to JSONL report file (default: fab_bandwidth_report.jsonl)")
+    parser.add_argument("--measure-report", type=str, default="../output/fab_bandwidth_report.jsonl", help="Path to JSONL report file (default: ../output/fab_bandwidth_report.jsonl)")
 
     # Proxies
     parser.add_argument("--proxy", action="append", default=[], help="Proxy server URL, e.g. http://user:pass@host:port (can be repeated)")
@@ -997,7 +997,7 @@ def main() -> int:
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
-    auth_file = script_dir / "auth.json"
+    auth_file = script_dir.parent / "setup" / "auth.json"
     if not auth_file.exists():
         print(f"ERROR: auth.json not found at {auth_file}", file=sys.stderr)
         return 1

@@ -77,3 +77,8 @@ auth.json
 ingestion-scripts/**/auth.json
 ingestion-scripts/**/*_metadata.json
 ingestion-scripts/**/fab_metadata.json
+
+# Fab scraper output
+ingestion-scripts/fab-scraper/setup/auth.json
+ingestion-scripts/fab-scraper/output/*.json
+ingestion-scripts/fab-scraper/output/*.jsonl
