@@ -304,6 +304,9 @@ class ScraperGUI:
         cmd.extend(["--out", self.out_file_var.get()])
         cmd.extend(["--use-url-file", self.url_file_var.get()])
         
+        # Always add progress-newlines for GUI parsing
+        cmd.append("--progress-newlines")
+        
         return cmd
     
     def _log(self, message, tag=None):
@@ -576,11 +579,15 @@ class ScraperGUI:
                 pass
         
         # Extract parallel completion info
-        # Pattern: "Saved progress: 5/100 completed"
-        if "saved progress" in err_lower and "completed" in err_lower:
+        # Pattern: "Progress: 5/100 (50.0%) completed" or "Saved progress: 5/100 completed"
+        if ("progress" in err_lower or "saved progress" in err_lower) and "completed" in err_lower:
             try:
                 import re
-                match = re.search(r'saved progress:\s*(\d+)/(\d+)\s*completed', line, re.IGNORECASE)
+                # Try new format first: "Progress: 5/100 (50.0%) completed"
+                match = re.search(r'progress:\s*(\d+)/(\d+)', line, re.IGNORECASE)
+                if not match:
+                    # Fallback to old format: "Saved progress: 5/100 completed"
+                    match = re.search(r'saved progress:\s*(\d+)/(\d+)', line, re.IGNORECASE)
                 if match:
                     current = int(match.group(1))
                     total = int(match.group(2))

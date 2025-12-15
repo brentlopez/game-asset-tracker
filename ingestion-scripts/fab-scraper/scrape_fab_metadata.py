@@ -912,6 +912,10 @@ def main() -> int:
     # Proxies
     parser.add_argument("--proxy", action="append", default=[], help="Proxy server URL, e.g. http://user:pass@host:port (can be repeated)")
     parser.add_argument("--proxy-list", type=str, help="Path to file with one proxy URL per line")
+    
+    # Progress display
+    parser.add_argument("--progress-newlines", action="store_true", help="Print progress on separate lines instead of updating in place (for GUI parsing)")
+    
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -1121,7 +1125,10 @@ def main() -> int:
                             cnt = fut.result()
                             completed += cnt
                             pct = round(100 * completed / total, 1)
-                            print(f"\rProgress: {completed}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
+                            if args.progress_newlines:
+                                print(f"Progress: {completed}/{total} ({pct}%) completed", file=sys.stderr)
+                            else:
+                                print(f"\rProgress: {completed}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
                         except Exception as e:
                             print(f"\nWorker failed: {e}", file=sys.stderr)
                     print("", file=sys.stderr)  # Final newline
@@ -1150,7 +1157,10 @@ def main() -> int:
                             if ok:
                                 completed += 1
                             pct = round(100 * completed / total, 1)
-                            print(f"\rProgress: {completed}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
+                            if args.progress_newlines:
+                                print(f"Progress: {completed}/{total} ({pct}%) completed", file=sys.stderr)
+                            else:
+                                print(f"\rProgress: {completed}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
                         except Exception as e:
                             print(f"\nWorker failed: {e}", file=sys.stderr)
                     print("", file=sys.stderr)  # Final newline
@@ -1225,7 +1235,10 @@ def main() -> int:
                     save_metadata_incrementally(out_path, results)
                     # Print progress update
                     pct = round(100 * len(results) / total, 1)
-                    print(f"\rProgress: {len(results)}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
+                    if args.progress_newlines:
+                        print(f"Progress: {len(results)}/{total} ({pct}%) completed", file=sys.stderr)
+                    else:
+                        print(f"\rProgress: {len(results)}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
                     # Log bandwidth if measurement enabled
                     if args.measure_bytes and args.measure_report:
                         snap = meter.snapshot_and_reset()
@@ -1302,7 +1315,10 @@ def main() -> int:
                     save_metadata_incrementally(out_path, results)
                     # Print progress update
                     pct = round(100 * len(results) / total, 1)
-                    print(f"\rProgress: {len(results)}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
+                    if args.progress_newlines:
+                        print(f"Progress: {len(results)}/{total} ({pct}%) completed", file=sys.stderr)
+                    else:
+                        print(f"\rProgress: {len(results)}/{total} ({pct}%) completed", end="", flush=True, file=sys.stderr)
                     # Log bandwidth if measurement enabled
                     if args.measure_bytes and args.measure_report:
                         snap = meter.snapshot_and_reset()
