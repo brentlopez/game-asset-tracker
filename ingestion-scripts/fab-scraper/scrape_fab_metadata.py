@@ -866,10 +866,7 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                             context.close()
                     except Exception:
                         pass
-                    if sleep_cfg:
-                        time.sleep(sleep_cfg.get("per_page", PER_PAGE_SLEEP_SEC))
-                    else:
-                        time.sleep(PER_PAGE_SLEEP_SEC)
+                    time.sleep(PER_PAGE_SLEEP_SEC)
         finally:
             try:
                 browser.close()
@@ -1088,12 +1085,13 @@ def main() -> int:
                 url_chunks = chunked(urls, args.parallel)
                 with ProcessPoolExecutor(max_workers=args.parallel) as executor:
                     futures = []
-                    for start_index, chunk in enumerate(url_chunks):
-                        proxy_url = proxies[start_index % len(proxies)] if proxies else None
+                    url_offset = 0
+                    for chunk_idx, chunk in enumerate(url_chunks):
+                        proxy_url = proxies[chunk_idx % len(proxies)] if proxies else None
                         futures.append(executor.submit(
                             _scrape_urls_process_worker,
                             chunk,
-                            start_index+1,
+                            url_offset + 1,  # 1-indexed start position for this chunk
                             total,
                             str(auth_file),
                             args.headless,
@@ -1111,6 +1109,7 @@ def main() -> int:
                             measure_bytes=args.measure_bytes,
                             measure_report_path=args.measure_report
                         ))
+                        url_offset += len(chunk)  # Move offset forward for next chunk
                     completed = 0
                     for fut in as_completed(futures):
                         try:
