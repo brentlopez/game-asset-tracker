@@ -270,8 +270,13 @@ def convert_entry(entry: Dict) -> Dict:
     # Create a copy to avoid modifying the original
     converted = entry.copy()
     
-    # Get the current description
+    # Check if already converted (raw_description exists and has content)
+    raw_description = entry.get('raw_description', '')
     description = entry.get('description', '')
+    
+    if raw_description:
+        # Already converted, skip
+        return converted
     
     if description:
         # Move original HTML to raw_description
