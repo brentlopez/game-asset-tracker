@@ -182,6 +182,40 @@ Parallel scraping dramatically speeds up large libraries:
 - CPU: 10-20%
 - Memory: 200-500 MB
 
+## Manifest Fetching (Non-Functional)
+
+⚠️ **The `--fetch-manifests` option exists but does not work due to Cloudflare protection.**
+
+### Why It Doesn't Work
+
+FAB's manifest API endpoints (`/e/artifacts/{id}/manifest`) are protected by Cloudflare's bot detection that blocks **all programmatic access**, even when:
+- Requests are made from an authenticated browser
+- Requests use JavaScript `fetch()` in the browser context
+- All authentication cookies are included
+
+**Result**: HTTP 403 Forbidden with Cloudflare challenge page
+
+### What the Scraper Captures
+
+The scraper successfully captures all publicly visible metadata:
+- ✅ Title
+- ✅ Description (HTML)
+- ✅ Tags
+- ✅ License text
+- ✅ FAB ID (UUID)
+- ✅ Original URL
+
+But **cannot** access:
+- ❌ Manifest data (download URLs, file lists)
+- ❌ Artifact metadata
+- ❌ Version-specific information
+
+### Future Options
+
+1. **Wait for FAB API changes** - Epic may provide official API access
+2. **Parse library exports** - The `fab_library_export_*.json` files may contain some manifest data
+3. **Manual extraction** - Not scalable for automation
+
 ## Documentation
 
 - **[Setup & Authentication](setup/README.md)** - How to authenticate with Fab.com

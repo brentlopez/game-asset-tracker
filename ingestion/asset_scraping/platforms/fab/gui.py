@@ -290,6 +290,7 @@ def _init_scraping_vars(tk_vars):
     tk_vars["auth_on_listings"] = tk.BooleanVar(value=False)
     tk_vars["captcha_retry"] = tk.BooleanVar(value=True)
     tk_vars["measure_bytes"] = tk.BooleanVar(value=False)
+    tk_vars["fetch_manifests"] = tk.BooleanVar(value=False)
     
     # Parameters
     tk_vars["max_scrolls"] = tk.StringVar(value="50")
@@ -388,6 +389,7 @@ def _create_scraping_options_content(parent, tk_vars):
     ttk.Checkbutton(parent, text="Captcha backoff + retry once", variable=tk_vars["captcha_retry"]).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
     ttk.Checkbutton(parent, text="Block heavy resources (images/media/fonts/analytics)", variable=tk_vars["block_heavy"]).grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
     ttk.Checkbutton(parent, text="Measure bytes (write JSONL report)", variable=tk_vars["measure_bytes"]).grid(row=9, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Fetch FAB manifests (bypasses CAPTCHA)", variable=tk_vars["fetch_manifests"]).grid(row=10, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
 
 
 def _create_scraping_parameters_content(parent, tk_vars):
@@ -631,6 +633,8 @@ def _build_command(tk_vars):
         cmd.append("--measure-bytes")
         if tk_vars["measure_report"].get().strip():
             cmd.extend(["--measure-report", tk_vars["measure_report"].get().strip()])
+    if tk_vars["fetch_manifests"].get():
+        cmd.append("--fetch-manifests")
     
     # Add parameters
     cmd.extend(["--sleep-min-ms", tk_vars["sleep_min"].get()])

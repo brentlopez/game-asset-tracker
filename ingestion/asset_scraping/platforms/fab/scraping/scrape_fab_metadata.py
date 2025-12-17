@@ -260,7 +260,7 @@ def wait_for_captcha_solve(page: Page, timeout_sec: int = CAPTCHA_WAIT_TIMEOUT_S
 
 
 def scrape_listing_with_retry(page: Page, url: str, skip_on_captcha: bool = False, 
-                               max_retries: int = 3, initial_timeout_ms: int = 30000) -> Dict | None:
+                               max_retries: int = 3, initial_timeout_ms: int = 30000, fetch_manifests: bool = False) -> Dict | None:
     """Scrape with exponential backoff retry on timeout.
     
     Retries with increasing timeouts:
@@ -289,7 +289,7 @@ def scrape_listing_with_retry(page: Page, url: str, skip_on_captcha: bool = Fals
         if attempt > 0:
             debug(f"Retry {attempt}/{max_retries} for {url} with {timeout_ms/1000:.0f}s timeout")
         
-        result = scrape_listing(page, url, skip_on_captcha=skip_on_captcha, timeout_ms=timeout_ms)
+        result = scrape_listing(page, url, skip_on_captcha=skip_on_captcha, timeout_ms=timeout_ms, fetch_manifests=fetch_manifests)
         
         if result is not None:
             return result
@@ -305,7 +305,110 @@ def scrape_listing_with_retry(page: Page, url: str, skip_on_captcha: bool = Fals
     return None
 
 
-def scrape_listing(page: Page, url: str, skip_on_captcha: bool = False, timeout_ms: int = 30000) -> Dict | None:
+def fetch_fab_manifest(page: Page, artifact_id: str, asset_id: str, namespace: str, platform: str = "Windows") -> Optional[Dict]:
+    """Fetch FAB manifest using page.evaluate() to bypass CAPTCHA.
+    
+    Executes fetch() in the browser context, which:
+    - Uses the browser's authenticated session (no CAPTCHA)
+    - Has access to cookies automatically
+    - Appears as a legitimate browser request
+    
+    Args:
+        page: Playwright page object
+        artifact_id: Artifact ID to fetch manifest for
+        asset_id: Asset/listing UID
+        namespace: Asset namespace
+        platform: Target platform (default: Windows)
+    
+    Returns:
+        Dict with manifest data or None on failure
+    """
+    manifest_url = f"https://www.fab.com/e/artifacts/{artifact_id}/manifest"
+    
+    try:
+        # Execute fetch in browser context to avoid CAPTCHA
+        manifest_data = page.evaluate("""
+            async ({url, artifact_id, asset_id, namespace, platform}) => {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            item_id: asset_id,
+                            namespace: namespace,
+                            platform: platform
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        return {
+                            error: true,
+                            status: response.status,
+                            statusText: response.statusText
+                        };
+                    }
+                    
+                    const data = await response.json();
+                    return {
+                        error: false,
+                        data: data
+                    };
+                } catch (e) {
+                    return {
+                        error: true,
+                        message: e.message
+                    };
+                }
+            }
+        """, {
+            "url": manifest_url,
+            "artifact_id": artifact_id,
+            "asset_id": asset_id,
+            "namespace": namespace,
+            "platform": platform
+        })
+        
+        if manifest_data.get('error'):
+            status = manifest_data.get('status', 'N/A')
+            error_msg = manifest_data.get('message') or manifest_data.get('statusText', 'Unknown error')
+            debug(f"Failed to fetch manifest for {artifact_id}: HTTP {status} - {error_msg}")
+            return None
+        
+        return manifest_data.get('data')
+        
+    except Exception as e:
+        debug(f"Error fetching manifest for {artifact_id}: {e}")
+        return None
+
+
+def extract_artifact_ids_from_page(fab_id: str) -> List[Dict[str, str]]:
+    """Get artifact ID for FAB listing.
+    
+    Based on analysis of FAB's API structure (see egs-api-py/example.py line 136):
+    The artifact ID IS the FAB listing UID (the UUID in the URL).
+    
+    Example:
+        URL: https://www.fab.com/listings/173cd7ad-7be8-44e0-ab63-2b3fd8ae317e
+        Artifact ID: 173cd7ad-7be8-44e0-ab63-2b3fd8ae317e
+    
+    Args:
+        fab_id: The FAB listing UID (UUID from the URL)
+    
+    Returns:
+        List with single dict containing the artifact_id (which is the fab_id)
+    """
+    return [{
+        'artifact_id': fab_id,
+        'version': 'latest',
+        'engine_version': 'unknown'
+    }]
+
+
+def scrape_listing(page: Page, url: str, skip_on_captcha: bool = False, timeout_ms: int = 30000, fetch_manifests: bool = False) -> Dict | None:
     """Scrape a single listing page with timeout.
     
     Args:
@@ -313,6 +416,7 @@ def scrape_listing(page: Page, url: str, skip_on_captcha: bool = False, timeout_
         url: URL to scrape
         skip_on_captcha: Whether to skip pages with captcha
         timeout_ms: Timeout for page.goto in milliseconds
+        fetch_manifests: Whether to fetch FAB manifests for this asset
     
     Returns:
         Dict with scraped data or None on failure
@@ -398,7 +502,7 @@ def scrape_listing(page: Page, url: str, skip_on_captcha: bool = False, timeout_
     # fab_id (UUID from URL)
     fab_id = extract_uuid_from_url(url)
 
-    return {
+    result = {
         "fab_id": fab_id,
         "title": title,
         "description": description_html,
@@ -406,6 +510,50 @@ def scrape_listing(page: Page, url: str, skip_on_captcha: bool = False, timeout_
         "license_text": license_text,
         "original_url": url,
     }
+    
+    # Optionally fetch manifests
+    if fetch_manifests:
+        debug(f"Fetching manifests for {fab_id}")
+        artifacts = extract_artifact_ids_from_page(fab_id)  # Pass fab_id, not page
+        
+        if artifacts:
+            debug(f"Found {len(artifacts)} artifact(s) for {fab_id}")
+            manifests = []
+            
+            for art in artifacts:
+                artifact_id = art['artifact_id']
+                debug(f"  Fetching manifest for artifact {artifact_id}")
+                
+                # Use fab_id as asset_id, empty namespace if not available
+                manifest = fetch_fab_manifest(
+                    page,
+                    artifact_id,
+                    fab_id,
+                    "ue"  # Namespace - typically "ue" for FAB/Unreal Engine assets
+                )
+                
+                if manifest:
+                    manifests.append({
+                        'artifact_id': artifact_id,
+                        'version': art.get('version', 'unknown'),
+                        'engine_version': art.get('engine_version', 'unknown'),
+                        'platform': 'Windows',
+                        'manifest_data': manifest
+                    })
+                    debug(f"  ✓ Manifest fetched for {artifact_id}")
+                else:
+                    debug(f"  ✗ Failed to fetch manifest for {artifact_id}")
+                
+                # Small delay between manifest fetches
+                page.wait_for_timeout(300)
+            
+            if manifests:
+                result['manifests'] = manifests
+                debug(f"Added {len(manifests)} manifest(s) to {fab_id}")
+        else:
+            debug(f"No artifacts found for {fab_id}")
+    
+    return result
 
 
 def load_existing_metadata(path: Path) -> tuple[List[Dict], Set[str]]:
@@ -726,7 +874,7 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
             meter.attach(per_page_context)
 
             listing_page = per_page_context.new_page()
-            data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=skip_on_captcha)
+            data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=skip_on_captcha, fetch_manifests=False)
             if data is None and captcha_retry:
                 # backoff, swap UA, retry once
                 time.sleep(2.0)
@@ -745,7 +893,7 @@ def _scrape_url_process_worker(url: str, idx: int, total: int,
                     per_page_context = per_page_browser.new_context(**ctx_kwargs)
                     setup_request_blocking(per_page_context, block_heavy)
                     listing_page = per_page_context.new_page()
-                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=skip_on_captcha)
+                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=skip_on_captcha, fetch_manifests=False)
                 except Exception:
                     data = None
             if data is None:
@@ -866,7 +1014,7 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                     meter = TrafficMeter(enabled=measure_bytes)
                     meter.attach(context)
                     page = context.new_page()
-                    data = scrape_listing_with_retry(page, url, skip_on_captcha=skip_on_captcha)
+                    data = scrape_listing_with_retry(page, url, skip_on_captcha=skip_on_captcha, fetch_manifests=False)
                     if data is None and captcha_retry:
                         # backoff and swap UA, retry once
                         time.sleep(2.0)
@@ -887,7 +1035,7 @@ def _scrape_urls_process_worker(urls: List[str], start_index: int, total: int,
                         meter = TrafficMeter(enabled=measure_bytes)
                         meter.attach(context)
                         page = context.new_page()
-                        data = scrape_listing_with_retry(page, url, skip_on_captcha=skip_on_captcha)
+                        data = scrape_listing_with_retry(page, url, skip_on_captcha=skip_on_captcha, fetch_manifests=False)
                         if measure_bytes and measure_report_path and data is None:
                             snap = meter.snapshot_and_reset()
                             _append_jsonl(Path(measure_report_path), {
@@ -981,6 +1129,9 @@ def main() -> int:
     parser.add_argument("--burst-size", type=int, default=5, help="After this many pages, insert a longer burst sleep (default: 5)")
     parser.add_argument("--burst-sleep-ms", type=int, default=3000, help="Burst sleep duration in ms (default: 3000)")
     parser.add_argument("--captcha-retry", action="store_true", help="If a listing triggers captcha (skipped), retry once with backoff and UA switch")
+    
+    # Manifest fetching
+    parser.add_argument("--fetch-manifests", action="store_true", help="Fetch FAB manifests for each asset (bypasses CAPTCHA using browser context)")
 
     # Traffic metering
     parser.add_argument("--measure-bytes", action="store_true", help="Measure total bytes per listing (based on response Content-Length) and write JSONL report")
@@ -1293,7 +1444,7 @@ def main() -> int:
                     meter.attach(per_page_context)
                     
                     listing_page = per_page_context.new_page()
-                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=args.skip_on_captcha)
+                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=args.skip_on_captcha, fetch_manifests=args.fetch_manifests)
                     if data is None:
                         debug(f"Skipped {url} (captcha or error)")
                         # Log bandwidth even for skipped pages
@@ -1374,7 +1525,7 @@ def main() -> int:
                 listing_page = context.new_page()
                 try:
                     print(f"Scraping {idx}/{total}: {url}")
-                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=args.skip_on_captcha)
+                    data = scrape_listing_with_retry(listing_page, url, skip_on_captcha=args.skip_on_captcha, fetch_manifests=args.fetch_manifests)
                     if data is None:
                         debug(f"Skipped {url} (captcha or error)")
                         # Log bandwidth even for skipped pages
