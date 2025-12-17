@@ -155,18 +155,120 @@ def create_scraping_tab(parent, tk_vars):
     _state["root"] = parent.winfo_toplevel()
     _state["log_queue"] = queue.Queue()
     
-    parent.columnconfigure(0, weight=1)
-    parent.rowconfigure(4, weight=1)
+    # Create a canvas with scrollbar for the entire tab
+    canvas = tk.Canvas(parent, highlightthickness=0, bd=0)
+    scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+    scrollable_frame = ttk.Frame(canvas)
+    
+    def _on_frame_configure(event):
+        # Update scroll region
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        # Check if scrolling is needed
+        bbox = canvas.bbox("all")
+        if bbox:
+            content_height = bbox[3] - bbox[1]
+            canvas_height = canvas.winfo_height()
+            # Only show scrollbar if content exceeds canvas height
+            if content_height > canvas_height:
+                scrollbar.pack(side="right", fill="y")
+            else:
+                scrollbar.pack_forget()
+    
+    scrollable_frame.bind("<Configure>", _on_frame_configure)
+    
+    canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    
+    # Make the scrollable frame fill the canvas width
+    def _configure_canvas(event):
+        canvas.itemconfig(canvas_window, width=event.width)
+    canvas.bind("<Configure>", _configure_canvas)
+    
+    # Pack canvas and scrollbar
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+    
+    # Enable mousewheel scrolling (only if scrollable)
+    def _on_mousewheel(event):
+        # Check if content is scrollable
+        bbox = canvas.bbox("all")
+        if bbox:
+            content_height = bbox[3] - bbox[1]
+            canvas_height = canvas.winfo_height()
+            if content_height > canvas_height:
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                return "break"
+        return "break"
+    
+    def _on_mousewheel_mac(event):
+        # Check if content is scrollable
+        bbox = canvas.bbox("all")
+        if bbox:
+            content_height = bbox[3] - bbox[1]
+            canvas_height = canvas.winfo_height()
+            if content_height > canvas_height:
+                canvas.yview_scroll(int(-1*event.delta), "units")
+                return "break"
+        return "break"
+    
+    def _bind_mousewheel(widget):
+        """Recursively bind mousewheel to widget and all children"""
+        # Skip text widgets that have their own scrolling
+        if isinstance(widget, (scrolledtext.ScrolledText, tk.Text)):
+            return
+        
+        try:
+            if sys.platform == "darwin":
+                widget.bind("<MouseWheel>", _on_mousewheel_mac)
+            else:
+                widget.bind("<MouseWheel>", _on_mousewheel)
+                widget.bind("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+                widget.bind("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+        except tk.TclError:
+            pass  # Some widgets can't be bound
+        
+        try:
+            for child in widget.winfo_children():
+                _bind_mousewheel(child)
+        except tk.TclError:
+            pass
+    
+    # Bind to canvas
+    if sys.platform == "darwin":
+        canvas.bind("<MouseWheel>", _on_mousewheel_mac)
+    else:
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        canvas.bind("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+    
+    # Configure scrollable_frame layout
+    scrollable_frame.columnconfigure(0, weight=1)
     
     # Initialize variables
     _init_scraping_vars(tk_vars)
     
-    # Build UI sections
-    _create_scraping_options(parent, tk_vars)
-    _create_scraping_parameters(parent, tk_vars)
-    _create_scraping_controls(parent, tk_vars)
-    _create_scraping_progress(parent, tk_vars)
-    _create_scraping_log(parent, tk_vars)
+    # Build UI sections with collapsible frames
+    row = 0
+    _create_collapsible_section(scrollable_frame, tk_vars, "Options", 
+                                lambda parent: _create_scraping_options_content(parent, tk_vars), 
+                                row, expanded=True)
+    row += 1
+    _create_collapsible_section(scrollable_frame, tk_vars, "Parameters", 
+                                lambda parent: _create_scraping_parameters_content(parent, tk_vars), 
+                                row, expanded=False)
+    row += 1
+    _create_scraping_controls(scrollable_frame, tk_vars, row)
+    row += 1
+    _create_collapsible_section(scrollable_frame, tk_vars, "Progress", 
+                                lambda parent: _create_scraping_progress_content(parent, tk_vars), 
+                                row, expanded=True)
+    row += 1
+    _create_collapsible_section(scrollable_frame, tk_vars, "Console", 
+                                lambda parent: _create_scraping_log_content(parent, tk_vars), 
+                                row, expanded=True)
+    
+    # Bind mousewheel to all widgets after they're created
+    _bind_mousewheel(scrollable_frame)
     
     # Start log updater
     _start_log_updater(tk_vars)
@@ -207,103 +309,160 @@ def _init_scraping_vars(tk_vars):
     tk_vars["progress"] = tk.DoubleVar(value=0)
 
 
-def _create_scraping_options(parent, tk_vars):
-    """Create scraping options section"""
-    flags_frame = ttk.LabelFrame(parent, text="Options", padding="10")
-    flags_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 10))
-    flags_frame.columnconfigure(0, weight=1)
-    flags_frame.columnconfigure(1, weight=1)
+def _create_collapsible_section(parent, tk_vars, title, content_builder, row, expanded=True):
+    """Create a collapsible section with expand/collapse functionality"""
+    # Container frame
+    container = ttk.Frame(parent)
+    container.grid(row=row, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 0))
+    container.columnconfigure(0, weight=1)
     
-    ttk.Checkbutton(flags_frame, text="Headless mode", variable=tk_vars["headless"]).grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Clear cache before scraping", variable=tk_vars["clear_cache"]).grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Test scroll only (no scraping)", variable=tk_vars["test_scroll"]).grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Skip library scrape (use URL file)", variable=tk_vars["skip_library"]).grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Skip pages with captchas", variable=tk_vars["skip_captcha"]).grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Force rescrape all URLs", variable=tk_vars["force_rescrape"]).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="New browser per page (avoid captchas)", variable=tk_vars["new_browser"]).grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Reuse one browser per worker (new context per URL)", variable=tk_vars["reuse_browser"]).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Randomize UA + viewport per context", variable=tk_vars["randomize_ua"]).grid(row=5, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Use auth on listing pages (normally off)", variable=tk_vars["auth_on_listings"]).grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Captcha backoff + retry once", variable=tk_vars["captcha_retry"]).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Block heavy resources (images/media/fonts/analytics)", variable=tk_vars["block_heavy"]).grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-    ttk.Checkbutton(flags_frame, text="Measure bytes (write JSONL report)", variable=tk_vars["measure_bytes"]).grid(row=9, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    # Top separator
+    ttk.Separator(container, orient="horizontal").grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+    
+    # Header frame with clickable area
+    header_frame = ttk.Frame(container, cursor="hand2")
+    header_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+    header_frame.columnconfigure(1, weight=1)
+    
+    # Store collapse state
+    collapse_var = tk.BooleanVar(value=not expanded)
+    
+    # Toggle function
+    def toggle(event=None):
+        if collapse_var.get():
+            # Expand
+            content_frame.grid()
+            arrow_label.config(text="▼")
+            collapse_var.set(False)
+        else:
+            # Collapse
+            content_frame.grid_remove()
+            arrow_label.config(text="▶")
+            collapse_var.set(True)
+    
+    # Arrow icon (small, clickable)
+    arrow_label = ttk.Label(header_frame, text="▼" if expanded else "▶", 
+                           font=("", 9), cursor="hand2")
+    arrow_label.grid(row=0, column=0, padx=(5, 5))
+    arrow_label.bind("<Button-1>", toggle)
+    
+    # Title label (also clickable)
+    title_label = ttk.Label(header_frame, text=title, font=("", 10, "bold"), cursor="hand2")
+    title_label.grid(row=0, column=1, sticky=tk.W)
+    title_label.bind("<Button-1>", toggle)
+    
+    # Make entire header frame clickable
+    header_frame.bind("<Button-1>", toggle)
+    
+    # Content frame (without border)
+    content_frame = ttk.Frame(container, padding="10")
+    content_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N), padx=(10, 0))
+    content_frame.columnconfigure(0, weight=1)
+    
+    # Build content
+    content_builder(content_frame)
+    
+    # Initially hide if not expanded
+    if not expanded:
+        content_frame.grid_remove()
+    
+    # Bottom separator (subtle)
+    ttk.Separator(container, orient="horizontal").grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(5, 10))
 
 
-def _create_scraping_parameters(parent, tk_vars):
-    """Create scraping parameters section"""
-    params_frame = ttk.LabelFrame(parent, text="Parameters", padding="10")
-    params_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 10))
-    params_frame.columnconfigure(1, weight=1)
+def _create_scraping_options_content(parent, tk_vars):
+    """Create scraping options content"""
+    parent.columnconfigure(0, weight=1)
+    parent.columnconfigure(1, weight=1)
+    
+    ttk.Checkbutton(parent, text="Headless mode", variable=tk_vars["headless"]).grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Clear cache before scraping", variable=tk_vars["clear_cache"]).grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Test scroll only (no scraping)", variable=tk_vars["test_scroll"]).grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Skip library scrape (use URL file)", variable=tk_vars["skip_library"]).grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Skip pages with captchas", variable=tk_vars["skip_captcha"]).grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Force rescrape all URLs", variable=tk_vars["force_rescrape"]).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="New browser per page (avoid captchas)", variable=tk_vars["new_browser"]).grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Reuse one browser per worker (new context per URL)", variable=tk_vars["reuse_browser"]).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Randomize UA + viewport per context", variable=tk_vars["randomize_ua"]).grid(row=5, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Use auth on listing pages (normally off)", variable=tk_vars["auth_on_listings"]).grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Captcha backoff + retry once", variable=tk_vars["captcha_retry"]).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Block heavy resources (images/media/fonts/analytics)", variable=tk_vars["block_heavy"]).grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    ttk.Checkbutton(parent, text="Measure bytes (write JSONL report)", variable=tk_vars["measure_bytes"]).grid(row=9, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+
+
+def _create_scraping_parameters_content(parent, tk_vars):
+    """Create scraping parameters content"""
+    parent.columnconfigure(1, weight=1)
     
     row = 0
-    ttk.Label(params_frame, text="Max scrolls:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    ttk.Entry(params_frame, textvariable=tk_vars["max_scrolls"], width=15).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+    ttk.Label(parent, text="Max scrolls:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    ttk.Entry(parent, textvariable=tk_vars["max_scrolls"], width=15).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
     
     row += 1
-    ttk.Label(params_frame, text="Scroll step (px):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    ttk.Entry(params_frame, textvariable=tk_vars["scroll_step"], width=15).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+    ttk.Label(parent, text="Scroll step (px):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    ttk.Entry(parent, textvariable=tk_vars["scroll_step"], width=15).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
     
     row += 1
-    ttk.Label(params_frame, text="Scroll steps per round:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    ttk.Entry(params_frame, textvariable=tk_vars["scroll_steps"], width=15).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+    ttk.Label(parent, text="Scroll steps per round:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    ttk.Entry(parent, textvariable=tk_vars["scroll_steps"], width=15).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
     
     row += 1
-    ttk.Label(params_frame, text="Parallel workers (1=sequential):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    parallel_frame = ttk.Frame(params_frame)
+    ttk.Label(parent, text="Parallel workers (1=sequential):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    parallel_frame = ttk.Frame(parent)
     parallel_frame.grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
     ttk.Entry(parallel_frame, textvariable=tk_vars["parallel"], width=10).pack(side=tk.LEFT)
     ttk.Label(parallel_frame, text="(2-10 recommended)", foreground="gray").pack(side=tk.LEFT, padx=(5, 0))
     
     row += 1
-    ttk.Label(params_frame, text="Output file:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    out_frame = ttk.Frame(params_frame)
+    ttk.Label(parent, text="Output file:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    out_frame = ttk.Frame(parent)
     out_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
     out_frame.columnconfigure(0, weight=1)
     ttk.Entry(out_frame, textvariable=tk_vars["out_file"]).grid(row=0, column=0, sticky=(tk.W, tk.E))
     ttk.Button(out_frame, text="Browse", command=lambda: _browse_output_file(tk_vars), width=8).grid(row=0, column=1, padx=(5, 0))
     
     row += 1
-    ttk.Label(params_frame, text="URL file (for --skip-library-scrape):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    url_frame = ttk.Frame(params_frame)
+    ttk.Label(parent, text="URL file (for --skip-library-scrape):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    url_frame = ttk.Frame(parent)
     url_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
     url_frame.columnconfigure(0, weight=1)
     ttk.Entry(url_frame, textvariable=tk_vars["url_file"]).grid(row=0, column=0, sticky=(tk.W, tk.E))
     ttk.Button(url_frame, text="Browse", command=lambda: _browse_url_file(tk_vars), width=8).grid(row=0, column=1, padx=(5, 0))
     
     row += 1
-    ttk.Label(params_frame, text="Proxy list file:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    proxy_frame = ttk.Frame(params_frame)
+    ttk.Label(parent, text="Proxy list file:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    proxy_frame = ttk.Frame(parent)
     proxy_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
     proxy_frame.columnconfigure(0, weight=1)
     ttk.Entry(proxy_frame, textvariable=tk_vars["proxy_file"]).grid(row=0, column=0, sticky=(tk.W, tk.E))
     ttk.Button(proxy_frame, text="Browse", command=lambda: _browse_proxy_file(tk_vars), width=8).grid(row=0, column=1, padx=(5, 0))
     
     row += 1
-    ttk.Label(params_frame, text="Measure report (JSONL):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    meas_frame = ttk.Frame(params_frame)
+    ttk.Label(parent, text="Measure report (JSONL):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    meas_frame = ttk.Frame(parent)
     meas_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
     meas_frame.columnconfigure(0, weight=1)
     ttk.Entry(meas_frame, textvariable=tk_vars["measure_report"]).grid(row=0, column=0, sticky=(tk.W, tk.E))
     
     # Cadence
     row += 1
-    ttk.Label(params_frame, text="Sleep min (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    ttk.Entry(params_frame, textvariable=tk_vars["sleep_min"], width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+    ttk.Label(parent, text="Sleep min (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    ttk.Entry(parent, textvariable=tk_vars["sleep_min"], width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
     row += 1
-    ttk.Label(params_frame, text="Sleep max (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    ttk.Entry(params_frame, textvariable=tk_vars["sleep_max"], width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+    ttk.Label(parent, text="Sleep max (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    ttk.Entry(parent, textvariable=tk_vars["sleep_max"], width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
     row += 1
-    ttk.Label(params_frame, text="Burst size:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    ttk.Entry(params_frame, textvariable=tk_vars["burst_size"], width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+    ttk.Label(parent, text="Burst size:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    ttk.Entry(parent, textvariable=tk_vars["burst_size"], width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
     row += 1
-    ttk.Label(params_frame, text="Burst sleep (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-    ttk.Entry(params_frame, textvariable=tk_vars["burst_sleep"], width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+    ttk.Label(parent, text="Burst sleep (ms):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+    ttk.Entry(parent, textvariable=tk_vars["burst_sleep"], width=10).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
 
 
-def _create_scraping_controls(parent, tk_vars):
+def _create_scraping_controls(parent, tk_vars, row):
     """Create scraping control buttons"""
     control_frame = ttk.Frame(parent)
-    control_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+    control_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
     
     tk_vars["start_button"] = ttk.Button(control_frame, text="Start Scraping", command=lambda: _start_scraping(tk_vars))
     tk_vars["start_button"].pack(side=tk.LEFT, padx=5)
@@ -317,27 +476,23 @@ def _create_scraping_controls(parent, tk_vars):
     tk_vars["status_label"].pack(side=tk.LEFT, padx=20)
 
 
-def _create_scraping_progress(parent, tk_vars):
-    """Create progress bar section"""
-    progress_frame = ttk.LabelFrame(parent, text="Progress", padding="10")
-    progress_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-    progress_frame.columnconfigure(0, weight=1)
+def _create_scraping_progress_content(parent, tk_vars):
+    """Create progress bar content"""
+    parent.columnconfigure(0, weight=1)
     
-    tk_vars["progress_bar"] = ttk.Progressbar(progress_frame, variable=tk_vars["progress"], maximum=100, mode='determinate')
+    tk_vars["progress_bar"] = ttk.Progressbar(parent, variable=tk_vars["progress"], maximum=100, mode='determinate')
     tk_vars["progress_bar"].grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
     
-    tk_vars["progress_label"] = ttk.Label(progress_frame, text="0 / 0 pages scraped")
+    tk_vars["progress_label"] = ttk.Label(parent, text="0 / 0 pages scraped")
     tk_vars["progress_label"].grid(row=1, column=0, sticky=tk.W, padx=5)
 
 
-def _create_scraping_log(parent, tk_vars):
-    """Create log output section"""
-    log_frame = ttk.LabelFrame(parent, text="Log Output", padding="10")
-    log_frame.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 0))
-    log_frame.columnconfigure(0, weight=1)
-    log_frame.rowconfigure(0, weight=1)
+def _create_scraping_log_content(parent, tk_vars):
+    """Create log output content"""
+    parent.columnconfigure(0, weight=1)
+    parent.rowconfigure(0, weight=1)
     
-    tk_vars["log_text"] = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, height=20, state=tk.DISABLED)
+    tk_vars["log_text"] = scrolledtext.ScrolledText(parent, wrap=tk.WORD, height=20, state=tk.DISABLED)
     tk_vars["log_text"].grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
     
     tk_vars["log_text"].tag_config("error", foreground="red")
@@ -348,15 +503,26 @@ def _create_scraping_log(parent, tk_vars):
 
 def _browse_output_file(tk_vars):
     """Browse for output file"""
-    filename = filedialog.asksaveasfilename(
-        title="Select output file",
-        initialdir=Path(__file__).parent,
-        initialfile=tk_vars["out_file"].get(),
-        defaultextension=".json",
+    # Allow selecting existing file or entering new filename
+    filename = filedialog.askopenfilename(
+        title="Select output file (or cancel to create new)",
+        initialdir=Path(__file__).parent / "output",
         filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
     )
     if filename:
-        tk_vars["out_file"].set(Path(filename).name)
+        # Store absolute path so script can find it regardless of working directory
+        tk_vars["out_file"].set(str(Path(filename).resolve()))
+    else:
+        # If cancelled, offer save dialog to create new file
+        filename = filedialog.asksaveasfilename(
+            title="Create new output file",
+            initialdir=Path(__file__).parent / "output",
+            initialfile="fab_metadata.json",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            tk_vars["out_file"].set(str(Path(filename).resolve()))
 
 
 def _browse_url_file(tk_vars):
@@ -368,7 +534,8 @@ def _browse_url_file(tk_vars):
         filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
     )
     if filename:
-        tk_vars["url_file"].set(Path(filename).name)
+        # Store absolute path so script can find it regardless of working directory
+        tk_vars["url_file"].set(str(Path(filename).resolve()))
 
 
 def _browse_proxy_file(tk_vars):
@@ -379,7 +546,8 @@ def _browse_proxy_file(tk_vars):
         filetypes=[("Text files", "*.txt *.list"), ("All files", "*.*")]
     )
     if filename:
-        tk_vars["proxy_file"].set(Path(filename).name)
+        # Store absolute path so script can find it regardless of working directory
+        tk_vars["proxy_file"].set(str(Path(filename).resolve()))
 
 
 def _start_scraping(tk_vars):
@@ -887,28 +1055,41 @@ def _browse_convert_input(tk_vars):
     """Browse for conversion input file"""
     filename = filedialog.askopenfilename(
         title="Select input JSON file",
-        initialdir=Path(__file__).parent,
-        initialfile=tk_vars["convert_input"].get(),
+        initialdir=Path(__file__).parent / "output",
         filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
     )
     if filename:
-        tk_vars["convert_input"].set(Path(filename).name)
+        # Store absolute path so script can find it regardless of working directory
+        tk_vars["convert_input"].set(str(Path(filename).resolve()))
         # Try to populate dropdown from selected file
         _try_populate_from_existing_file(tk_vars)
 
 
 def _browse_convert_output(tk_vars):
     """Browse for conversion output file"""
-    filename = filedialog.asksaveasfilename(
-        title="Select output JSON file",
-        initialdir=Path(__file__).parent,
-        defaultextension=".json",
+    # Allow selecting existing file or entering new filename
+    filename = filedialog.askopenfilename(
+        title="Select output file (or cancel to create new)",
+        initialdir=Path(__file__).parent / "output",
         filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
     )
     if filename:
-        tk_vars["convert_output"].set(Path(filename).name)
+        # Store absolute path so script can find it regardless of working directory
+        tk_vars["convert_output"].set(str(Path(filename).resolve()))
         # Try to populate dropdown from selected file if it exists
         _try_populate_from_existing_file(tk_vars)
+    else:
+        # If cancelled, offer save dialog to create new file
+        filename = filedialog.asksaveasfilename(
+            title="Create new output file",
+            initialdir=Path(__file__).parent / "output",
+            initialfile="fab_metadata_converted.json",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            tk_vars["convert_output"].set(str(Path(filename).resolve()))
+            _try_populate_from_existing_file(tk_vars)
 
 
 def _start_conversion(tk_vars):
@@ -921,7 +1102,12 @@ def _start_conversion(tk_vars):
         _log_convert(f"Error: {e}", "error", tk_vars)
         return
     
-    input_file = Path(__file__).parent / tk_vars["convert_input"].get()
+    # Handle both absolute and relative paths for input file
+    input_file_str = tk_vars["convert_input"].get()
+    input_file = Path(input_file_str)
+    if not input_file.is_absolute():
+        input_file = Path(__file__).parent / input_file_str
+    
     if not input_file.exists():
         _log_convert(f"Error: Input file not found: {input_file}", "error", tk_vars)
         return
@@ -935,9 +1121,12 @@ def _start_conversion(tk_vars):
     
     cmd = [sys.executable, str(_state["converter_path"]), str(input_file)]
     
-    output_file_name = tk_vars["convert_output"].get().strip()
-    if output_file_name:
-        output_file = Path(__file__).parent / output_file_name
+    output_file_str = tk_vars["convert_output"].get().strip()
+    if output_file_str:
+        # Handle both absolute and relative paths for output file
+        output_file = Path(output_file_str)
+        if not output_file.is_absolute():
+            output_file = Path(__file__).parent / output_file_str
         cmd.extend(["-o", str(output_file)])
     
     cmd.extend(["-w", str(workers)])
@@ -1047,7 +1236,11 @@ def _try_populate_from_existing_file(tk_vars):
     json_file = output_file if output_file else input_file
     
     if json_file:
-        json_path = Path(__file__).parent / json_file
+        # Handle both absolute and relative paths
+        json_path = Path(json_file)
+        if not json_path.is_absolute():
+            json_path = Path(__file__).parent / json_file
+        
         if json_path.exists():
             # Check if file has markdown descriptions
             try:
@@ -1069,7 +1262,10 @@ def _try_populate_from_existing_file(tk_vars):
 def _populate_asset_dropdown(tk_vars, json_file_path):
     """Populate asset dropdown from JSON file"""
     try:
-        json_path = Path(__file__).parent / json_file_path
+        # Handle both absolute and relative paths
+        json_path = Path(json_file_path)
+        if not json_path.is_absolute():
+            json_path = Path(__file__).parent / json_file_path
         
         if not json_path.exists():
             _log_convert(f"Warning: Cannot populate preview - file not found: {json_path}", "warning", tk_vars)

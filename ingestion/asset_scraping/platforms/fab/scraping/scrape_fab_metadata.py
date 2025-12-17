@@ -1002,7 +1002,12 @@ def main() -> int:
         print(f"ERROR: auth.json not found at {auth_file}", file=sys.stderr)
         return 1
 
-    out_path = script_dir / args.out
+    # Handle both absolute and relative paths for output file
+    out_path_input = Path(args.out)
+    if out_path_input.is_absolute():
+        out_path = out_path_input
+    else:
+        out_path = (script_dir / args.out).resolve()
     
     # Load existing metadata or clear if requested
     if args.clear_cache and out_path.exists():
@@ -1037,7 +1042,12 @@ def main() -> int:
         urls: List[str] = []
         if args.skip_library_scrape:
             # Load URLs from JSON file instead of scraping
-            url_file_path = script_dir / args.use_url_file
+            # Handle both absolute and relative paths
+            url_file_input = Path(args.use_url_file)
+            if url_file_input.is_absolute():
+                url_file_path = url_file_input
+            else:
+                url_file_path = (script_dir / args.use_url_file).resolve()
             if not url_file_path.exists():
                 print(f"ERROR: URL file not found at {url_file_path}", file=sys.stderr)
                 try:
