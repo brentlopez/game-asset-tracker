@@ -4,10 +4,9 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-This directory contains ingestion tools for the Game Asset Tracking System. There are two main systems:
+This directory contains ingestion tools for the Game Asset Tracking System.
 
-1. **`ingest.py`** - Generic asset pack ingestion script that scans local directories
-2. **`asset_scraping/`** - Modular marketplace scraping system with unified GUI
+**`ingest.py`** is a generic asset pack ingestion script that scans local directories.
 
 ### Filesystem Ingestion (`ingest.py`)
 
@@ -22,24 +21,6 @@ JSON Manifest (strict schema)
 Obsidian Plugin (creates SQLite index + Markdown notes)
 ```
 
-### Marketplace Scraping (`asset_scraping/`)
-
-A modular, platform-agnostic system for scraping metadata from online game asset marketplaces. **See `asset_scraping/README.md` for complete documentation.**
-
-**Architecture:**
-- `asset_scraper.py` - Platform-agnostic GUI launcher
-- `platforms.json` - Platform manifest (defines available platforms)
-- `platforms/` - Platform-specific implementations:
-  - `platforms/fab/` - Fab (Epic) marketplace scraper
-  - `platforms/unity/` - Unity Asset Store scraper
-
-**Each platform has:**
-- `gui.py` - GUI module (Setup, Scraping, Post-Processing tabs)
-- `setup/` - Authentication scripts
-- `scraping/` - Scraping scripts
-- `post_processing/` - Post-processing scripts
-- `output/` - Generated files
-- `docs/` - Platform-specific documentation
 
 ## Repository Structure
 
@@ -48,30 +29,8 @@ ingestion/
 ├── ingest.py              # Filesystem ingestion script
 ├── requirements.txt       # Dependencies for ingest.py
 ├── README.md              # Overview of ingestion systems
-├── WARP.md                # This file
-└── asset_scraping/        # Marketplace scraping system
-    ├── asset_scraper.py   # Platform-agnostic GUI launcher
-    ├── platforms.json     # Platform manifest
-    ├── requirements.txt   # Scraping-specific dependencies
-    ├── README.md          # Asset scraping documentation
-    └── platforms/         # Platform-specific implementations
-        ├── fab/           # Fab (Epic) marketplace
-        │   ├── gui.py
-        │   ├── setup/
-        │   ├── scraping/
-        │   ├── post_processing/
-        │   ├── output/
-        │   └── docs/
-        └── unity/         # Unity Asset Store
-            ├── gui.py
-            ├── setup/
-            ├── scraping/
-            ├── post_processing/
-            ├── output/
-            └── docs/
+└── WARP.md                # This file
 ```
-
-**Important:** The asset scraping system was refactored (December 2024) to use a modular, platform-agnostic architecture with a manifest-based approach for extensibility.
 
 ## Development Commands
 

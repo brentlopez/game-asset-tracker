@@ -4,10 +4,7 @@ Tools for ingesting game asset data into the Game Asset Tracking System.
 
 ## Overview
 
-This directory contains two main systems:
-
-1. **`ingest.py`** - Filesystem scanner for generating JSON manifests from local asset directories
-2. **`asset_scraping/`** - Marketplace scraping system for extracting metadata from online stores (Fab, Unity, etc.)
+This directory contains the filesystem scanner for generating JSON manifests from local asset directories.
 
 ## Filesystem Ingestion (`ingest.py`)
 
@@ -218,31 +215,6 @@ The output JSON strictly conforms to the schema defined in `../ARCHITECTURE.md`.
 | `assets[].metadata` | object | Format-specific metadata |
 | `assets[].local_tags` | array[string] | Tags from folder structure |
 
-## Marketplace Scraping (`asset_scraping/`)
-
-A modular system for scraping metadata from online game asset marketplaces.
-
-**Supported Platforms:**
-- Fab (Epic Marketplace)
-- Unity Asset Store
-- Extensible architecture for adding new platforms
-
-**Features:**
-- Unified GUI with platform selector
-- 3-tab interface: Setup, Scraping, Post-Processing
-- Browser-based authentication
-- Parallel scraping support
-- HTML to Markdown conversion
-
-**Quick Start:**
-```bash
-cd asset_scraping
-pip install -r requirements.txt
-python3 -m playwright install
-python3 asset_scraper.py
-```
-
-**See [`asset_scraping/README.md`](asset_scraping/README.md) for complete documentation.**
 
 ## Troubleshooting
 
@@ -262,9 +234,6 @@ If relative paths appear incorrect, ensure you're running the script from the co
 #### Permission errors
 Ensure you have read access to all files in the target directory.
 
-### Marketplace Scraping
-
-See [`asset_scraping/README.md`](asset_scraping/README.md) for troubleshooting marketplace-specific issues.
 
 ## Contributing
 

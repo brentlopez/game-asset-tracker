@@ -47,7 +47,7 @@ chmod +x ingest_vault.py
 ```
 
 ### Web Metadata
-The script looks for `../../asset_scraping/platforms/fab/output/fab_metadata.json` which contains:
+The script can optionally use `fab_metadata.json` which contains:
 - Asset titles
 - Tags
 - Descriptions
