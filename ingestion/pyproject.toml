@@ -1,0 +1,63 @@
+[project]
+name = "game-asset-tracker-ingestion"
+version = "0.1.0"
+description = "Filesystem scanner for generating JSON manifests of game asset packs"
+authors = [
+    { name = "Brent Lopez", email = "brent@brentlopez.dev" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.0.0",
+    "mutagen>=1.47.0",
+]
+readme = "README.md"
+license = { text = "MIT" }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+    "mypy>=1.0.0",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "types-jsonschema>=4.25.1.20251009",
+]
+
+[project.scripts]
+ingest = "game_asset_tracker_ingestion.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "S", "UP"]
+ignore = [
+    "S101",  # Allow assert statements in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]  # Allow asserts and hardcoded passwords in tests
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_unimported = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=game_asset_tracker_ingestion --cov-report=term-missing"

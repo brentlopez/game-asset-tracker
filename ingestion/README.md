@@ -17,21 +17,26 @@ Recursively scans a directory tree and generates a standardized JSON manifest co
 ## Installation
 
 ### Requirements
-- Python 3.7 or higher
-- pip (Python package manager)
+- Python 3.11 or higher
+- uv package manager ([install instructions](https://docs.astral.sh/uv/))
 
 ### Setup
 
-1. **Install dependencies:**
+1. **Clone or navigate to the repository:**
    ```bash
-   pip install -r requirements.txt
+   cd /path/to/game-asset-tracker/ingestion
    ```
 
-   The only dependency is `mutagen` for audio metadata extraction. If you don't need audio metadata, the script will work without it.
-
-2. **Make the script executable (optional):**
+2. **Install dependencies:**
    ```bash
-   chmod +x ingest.py
+   uv sync
+   ```
+
+   This will create a virtual environment in `.venv/` and install all required dependencies including `jsonschema` and `mutagen`.
+
+3. **Verify installation:**
+   ```bash
+   uv run ingest --help
    ```
 
 ## Usage
@@ -39,7 +44,7 @@ Recursively scans a directory tree and generates a standardized JSON manifest co
 ### Basic Syntax
 
 ```bash
-python ingest.py --path <directory> --name "<pack_name>" --source "<source>" [--tags <tag1> <tag2> ...] [--license <url>]
+uv run ingest --path <directory> --name "<pack_name>" --source "<source>" [--tags <tag1> <tag2> ...] [--license <url>]
 ```
 
 ### Required Arguments
@@ -57,7 +62,7 @@ python ingest.py --path <directory> --name "<pack_name>" --source "<source>" [--
 
 **1. Basic usage with minimal arguments:**
 ```bash
-python ingest.py \
+uv run ingest \
   --path /Volumes/NAS/Assets/Unity/DragonPack \
   --name "Dragon Character Pack" \
   --source "Unity Asset Store"
@@ -65,7 +70,7 @@ python ingest.py \
 
 **2. With global tags:**
 ```bash
-python ingest.py \
+uv run ingest \
   --path /Volumes/NAS/Assets/Unity/DragonPack \
   --name "Dragon Character Pack" \
   --source "Unity Asset Store" \
@@ -74,7 +79,7 @@ python ingest.py \
 
 **3. With license link:**
 ```bash
-python ingest.py \
+uv run ingest \
   --path /Volumes/NAS/Assets/Unity/DragonPack \
   --name "Dragon Character Pack" \
   --source "Unity Asset Store" \
@@ -84,7 +89,7 @@ python ingest.py \
 
 **4. Pipe output to a file:**
 ```bash
-python ingest.py \
+uv run ingest \
   --path /Volumes/NAS/Assets/Unity/DragonPack \
   --name "Dragon Character Pack" \
   --source "Unity Asset Store" \
@@ -94,7 +99,7 @@ python ingest.py \
 
 **5. Scan a relative path:**
 ```bash
-python ingest.py \
+uv run ingest \
   --path ../my-assets/sound-effects \
   --name "Sound Effects Pack" \
   --source "NAS" \
@@ -216,6 +221,27 @@ The output JSON strictly conforms to the schema defined in `../ARCHITECTURE.md`.
 | `assets[].local_tags` | array[string] | Tags from folder structure |
 
 
+## Development
+
+### Running Tests
+
+```bash
+uv run pytest
+```
+
+### Code Quality
+
+**Linting:**
+```bash
+uv run ruff check src/
+uv run ruff format src/
+```
+
+**Type Checking:**
+```bash
+uv run mypy src/
+```
+
 ## Troubleshooting
 
 ### Filesystem Ingestion
@@ -223,7 +249,7 @@ The output JSON strictly conforms to the schema defined in `../ARCHITECTURE.md`.
 #### "mutagen not found" warning
 This is normal if you haven't installed mutagen. Audio files will still be processed, just without duration/sample rate metadata.
 
-**Solution**: Install mutagen with `pip install mutagen`
+**Solution**: Run `uv sync` to install all dependencies
 
 #### Script skips hidden files
 This is intentional. Files starting with `.` (like `.DS_Store`) are ignored.
