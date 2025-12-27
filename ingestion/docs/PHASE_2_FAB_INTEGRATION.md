@@ -114,7 +114,7 @@ Ensure Phase 1 is complete:
 
 #### fab-api-client
 
-**Version**: >= 2.0.0  
+**Version**: >= 2.1.0  
 **Location**: `../../fab-api-client/`  
 **Documentation**: See `../../fab-api-client/README.md`
 
@@ -152,9 +152,9 @@ Update `pyproject.toml` to add optional dependencies:
 
 ```toml
 [project.optional-dependencies]
-fab = ["fab-api-client>=2.0.0"]
-uas = ["uas-api-client>=1.0.0"]
-all = ["fab-api-client>=2.0.0", "uas-api-client>=1.0.0"]
+fab = ["fab-api-client>=2.1.0"]
+uas = ["uas-api-client>=2.1.0"]
+all = ["fab-api-client>=2.1.0", "uas-api-client>=2.1.0"]
 ```
 
 Install with:
@@ -299,11 +299,11 @@ Add optional dependencies section:
 
 ```toml
 [project.optional-dependencies]
-fab = ["fab-api-client>=2.0.0"]
-uas = ["uas-api-client>=1.0.0"]
+fab = ["fab-api-client>=2.1.0"]
+uas = ["uas-api-client>=2.1.0"]
 all = [
-    "fab-api-client>=2.0.0",
-    "uas-api-client>=1.0.0",
+    "fab-api-client>=2.1.0",
+    "uas-api-client>=2.1.0",
 ]
 ```
 

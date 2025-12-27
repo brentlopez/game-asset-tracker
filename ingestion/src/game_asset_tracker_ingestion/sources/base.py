@@ -7,7 +7,10 @@ source adapters must implement to integrate with the ingestion pipeline.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from ..transformers.base import Transformer
 
 
 @runtime_checkable
@@ -99,5 +102,17 @@ class Source(ABC):
             
         Raises:
             Exception: If data retrieval fails
+        """
+        pass
+    
+    @abstractmethod
+    def get_transformer(self) -> "Transformer":
+        """Get the transformer for this source.
+        
+        Each source provides its own transformer that knows how to convert
+        the source-specific data into game-asset-tracker manifests.
+        
+        Returns:
+            Transformer instance for this source type
         """
         pass

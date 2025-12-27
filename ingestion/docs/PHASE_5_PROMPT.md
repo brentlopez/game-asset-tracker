@@ -19,7 +19,7 @@ Use this prompt with a future agent to implement Phase 5:
 
 2. Add optional dependency to `pyproject.toml`:
    ```toml
-   uas = ["uas-api-client>=1.0.0"]
+   uas = ["uas-api-client>=2.1.0"]
    ```
 
 3. Write tests in `tests/test_uas_platform.py`

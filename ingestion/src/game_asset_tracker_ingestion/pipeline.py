@@ -118,10 +118,6 @@ class IngestionPipeline:
         # Get data from source
         data = self.source.get_asset_data(asset, download=should_download)
         
-        # Transform to manifest
-        # Note: For Phase 1, we'll import and use the transformer directly
-        # In future phases, transformers will be more modular
-        from .platforms.filesystem import FilesystemTransformer
-        
-        transformer = FilesystemTransformer()
+        # Get the source's transformer and use it to transform
+        transformer = self.source.get_transformer()
         return transformer.transform(asset, data, pack_name=pack_name, **kwargs)

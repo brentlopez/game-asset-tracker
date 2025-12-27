@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from ...core.metadata import extract_metadata
 from ...core.types import Asset
 from ...sources.base import AssetData, Source, SourceAsset
+from ...transformers.base import Transformer
 
 # Maximum length for metadata strings to prevent DoS
 MAX_METADATA_STRING_LENGTH = 2048
@@ -136,6 +137,10 @@ class FilesystemSource(Source):
         
         if not self.path.is_dir():
             raise ValueError(f"Path is not a directory: {self.path}")
+        
+        # Create transformer instance for this source
+        from .transformer import FilesystemTransformer
+        self._transformer = FilesystemTransformer()
     
     def list_assets(self) -> list[SourceAsset]:
         """List available assets.
@@ -201,6 +206,14 @@ class FilesystemSource(Source):
                 for f in files
             ],
         )
+    
+    def get_transformer(self) -> Transformer:
+        """Get the transformer for this source.
+        
+        Returns:
+            FilesystemTransformer instance
+        """
+        return self._transformer
     
     def _scan_directory(self, root_path: Path) -> list[Asset]:
         """Recursively scan a directory and collect asset metadata.

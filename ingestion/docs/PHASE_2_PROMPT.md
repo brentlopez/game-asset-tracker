@@ -20,7 +20,7 @@ Use this prompt with a future agent to implement Phase 2:
 2. Add optional dependency to `pyproject.toml`:
    ```toml
    [project.optional-dependencies]
-   fab = ["fab-api-client>=2.0.0"]
+   fab = ["fab-api-client>=2.1.0"]
    ```
 
 3. Write comprehensive tests in `tests/test_fab_platform.py`

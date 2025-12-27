@@ -13,6 +13,12 @@ dependencies = [
 readme = "README.md"
 license = { text = "MIT" }
 
+[project.optional-dependencies]
+fab = ["fab-api-client @ git+https://github.com/brentlopez/fab-api-client.git"]
+all = [
+    "fab-api-client @ git+https://github.com/brentlopez/fab-api-client.git",
+]
+
 [dependency-groups]
 dev = [
     "ruff>=0.8.0",
@@ -28,6 +34,9 @@ ingest = "game_asset_tracker_ingestion.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.ruff]
 target-version = "py311"
