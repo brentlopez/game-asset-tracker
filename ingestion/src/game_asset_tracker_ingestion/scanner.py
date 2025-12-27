@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .metadata import extract_metadata
-from .types import Asset
+from .core.metadata import extract_metadata
+from .core.types import Asset
 
 # Maximum length for metadata strings to prevent DoS
 MAX_METADATA_STRING_LENGTH = 2048

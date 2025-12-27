@@ -13,7 +13,8 @@ from jsonschema import ValidationError
 from .types import Manifest
 
 # Path to the schema file (relative to this module)
-SCHEMA_PATH = Path(__file__).parent.parent.parent.parent / "schemas" / "manifest.schema.json"
+# ingestion/src/game_asset_tracker_ingestion/core/validator.py -> game-asset-tracker/schemas/
+SCHEMA_PATH = Path(__file__).parent.parent.parent.parent.parent / "schemas" / "manifest.schema.json"
 
 
 def load_schema() -> dict[str, Any]:

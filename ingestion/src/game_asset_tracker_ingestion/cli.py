@@ -7,12 +7,12 @@ from asset directories.
 import argparse
 import json
 import sys
-import uuid
 from pathlib import Path
 
-from .scanner import scan_directory, validate_url
-from .types import Manifest
-from .validator import validate_manifest_with_error_details
+from .core.types import Manifest
+from .core.validator import validate_manifest_with_error_details
+from .platforms.filesystem import validate_url
+from .registry import SourceRegistry
 
 
 def generate_manifest(
@@ -41,27 +41,28 @@ def generate_manifest(
     if license_link:
         validate_url(license_link)
 
-    # Generate unique pack ID (lowercase UUID as per schema)
-    pack_id = str(uuid.uuid4())
-
     # Resolve root path to absolute
     root_path_abs = root_path.resolve()
 
-    # Scan directory and collect assets
+    # Create pipeline using registry
     print(f"Scanning directory: {root_path_abs}", file=sys.stderr)
-    assets = scan_directory(root_path_abs)
-    print(f"Found {len(assets)} assets", file=sys.stderr)
-
-    # Build manifest
-    manifest = Manifest(
-        pack_id=pack_id,
+    pipeline = SourceRegistry.create_pipeline('filesystem', path=root_path_abs)
+    
+    # Get the single asset (directory) from the source
+    assets = pipeline.source.list_assets()
+    asset = assets[0]  # Filesystem sources have one asset - the directory
+    
+    # Generate manifest with CLI parameters
+    manifest = pipeline.generate_manifest_for_asset(
+        asset,
         pack_name=pack_name,
-        root_path=str(root_path_abs),
         source=source,
-        license_link=license_link or "",
         global_tags=global_tags,
-        assets=assets,
+        license_link=license_link or "",
+        root_path=str(root_path_abs),
     )
+    
+    print(f"Found {len(manifest['assets'])} assets", file=sys.stderr)
 
     return manifest
 
