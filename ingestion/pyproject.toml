@@ -14,10 +14,9 @@ readme = "README.md"
 license = { text = "MIT" }
 
 [project.optional-dependencies]
-fab = ["fab-api-client @ git+https://github.com/brentlopez/fab-api-client.git"]
-all = [
-    "fab-api-client @ git+https://github.com/brentlopez/fab-api-client.git",
-]
+fab = ["fab-api-client"]
+uas = ["uas-api-client", "aiohttp>=3.9.0", "aiofiles>=23.0.0"]
+all = ["fab-api-client", "uas-api-client", "aiohttp>=3.9.0", "aiofiles>=23.0.0"]
 
 [dependency-groups]
 dev = [
@@ -26,6 +25,10 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "types-jsonschema>=4.25.1.20251009",
+]
+test-auth = [
+    "fab-egl-adapter",
+    "uas-adapter",
 ]
 
 [project.scripts]
@@ -70,3 +73,27 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --cov=game_asset_tracker_ingestion --cov-report=term-missing"
+
+
+
+[tool.dependency-versions]
+# Version tags for GitHub-hosted dependencies
+# Used by scripts/switch-deps.sh when switching from local to GitHub mode
+github-user = "brentlopez"
+fab-api-client = "v2.1.0"
+uas-api-client = "v2.1.0"
+asset-marketplace-client-core = "v0.2.0"
+fab-egl-adapter = "v2.1.0"
+uas-adapter = "v2.1.0"
+
+
+
+
+[tool.uv.sources]
+# GitHub dependencies (default for distribution)
+# Use ./scripts/switch-deps.sh local to switch to local paths for development
+fab-api-client = { git = "https://github.com/brentlopez/fab-api-client.git", tag = "v2.1.0" }
+uas-api-client = { git = "https://github.com/brentlopez/uas-api-client.git", tag = "v2.1.0" }
+asset-marketplace-client-core = { git = "https://github.com/brentlopez/asset-marketplace-client-core.git", tag = "v0.2.0" }
+fab-egl-adapter = { git = "https://github.com/brentlopez/fab-egl-adapter.git", tag = "v2.1.0" }
+uas-adapter = { git = "https://github.com/brentlopez/uas-adapter.git", tag = "v2.1.0" }

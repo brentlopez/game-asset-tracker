@@ -1,3 +1,7 @@
+# IMPORTANT: Do not commit local path dependencies
+# Always keep GitHub dependencies as default in pyproject.toml
+# Use ./scripts/switch-deps.sh local for development
+
 # Python
 __pycache__/
 *.py[cod]
@@ -99,3 +103,7 @@ ingestion-scripts/fab-scraper/output/*.jsonl
 # Unity scraper output
 ingestion-scripts/unity-scraper/setup/auth.json
 ingestion-scripts/unity-scraper/output/*.json
+
+# Test scripts with authentication (DO NOT COMMIT)
+ingestion/examples/*_test.py
+ingestion/manifests/*_test/
