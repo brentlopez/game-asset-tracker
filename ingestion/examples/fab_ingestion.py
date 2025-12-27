@@ -61,13 +61,19 @@ def main():
     
     # Tier 1: Create ingestion pipeline
     print("\nStep 3: Creating ingestion pipeline...")
+    
+    # Choose download strategy
+    # 'metadata_only': Fast, creates placeholder assets (Phase 2)
+    # 'manifests_only': Downloads manifests, gets file lists (Phase 3)
+    download_strategy = 'manifests_only'  # Change to 'metadata_only' for faster execution
+    
     try:
         pipeline = SourceRegistry.create_pipeline(
             'fab',
             client=client,
-            download_strategy='metadata_only'  # Phase 2: metadata only
+            download_strategy=download_strategy
         )
-        print("✓ Pipeline created successfully")
+        print(f"✓ Pipeline created successfully (strategy: {download_strategy})")
     except Exception as e:
         print(f"Error: Could not create pipeline: {e}", file=sys.stderr)
         return 1
@@ -85,6 +91,8 @@ def main():
         for manifest in pipeline.generate_manifests():
             pack_id = manifest['pack_id']
             pack_name = manifest['pack_name']
+            file_count = len(manifest['assets'])
+            total_size = sum(a['size_bytes'] for a in manifest['assets'])
             
             # Write to file
             output_file = output_dir / f"{pack_id}.json"
@@ -92,7 +100,13 @@ def main():
                 with open(output_file, 'w', encoding='utf-8') as f:
                     json.dump(manifest, f, indent=2, ensure_ascii=False)
                 
-                print(f"  ✓ {pack_name} → {output_file.name}")
+                # Show file count and size info
+                if download_strategy == 'manifests_only':
+                    size_gb = total_size / (1024**3)
+                    print(f"  ✓ {pack_name} → {output_file.name} ({file_count} files, {size_gb:.2f} GB)")
+                else:
+                    print(f"  ✓ {pack_name} → {output_file.name}")
+                
                 count += 1
             except Exception as e:
                 print(f"  ✗ Failed to write {pack_name}: {e}", file=sys.stderr)

@@ -4,7 +4,10 @@ This module provides a Source adapter for the Fab marketplace (Epic Games)
 using the fab-api-client library.
 """
 
+import shutil
 import sys
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 from fab_api_client import Asset as FabAsset
@@ -141,39 +144,56 @@ class FabSource(Source):
     ) -> AssetData:
         """Get data for transformation.
         
-        Phase 2: Returns only metadata. Does not download manifests.
+        Phase 2: Returns only metadata (download=False)
+        Phase 3: Downloads and parses manifest (download=True)
         
         Args:
             asset: SourceAsset to retrieve data for
-            download: If True, download manifests (Phase 3 feature)
+            download: If True, download and parse manifest
             
         Returns:
-            AssetData containing raw Fab asset metadata
+            AssetData with optional parsed manifest
             
         Raises:
             ValueError: If asset is not a FabAssetAdapter
-            NotImplementedError: If download=True (Phase 3 feature)
         """
         if not isinstance(asset, FabAssetAdapter):
             raise ValueError(
                 f"Expected FabAssetAdapter, got {type(asset).__name__}"
             )
         
+        fab_asset = asset.raw_asset
+        
         if download:
             # Phase 3: Download and parse manifest
-            raise NotImplementedError(
-                "Manifest downloading not yet implemented. "
-                "This is a Phase 3 feature. Use download_strategy='metadata_only'."
-            )
+            print(f"Downloading manifest for {fab_asset.title}...", file=sys.stderr)
+            
+            temp_dir = Path(tempfile.mkdtemp(prefix='fab-manifests-'))
+            
+            try:
+                manifest_result = self.client.download_manifest(
+                    fab_asset,
+                    download_path=temp_dir
+                )
+                
+                parsed_manifest = manifest_result.load()
+                print(f"  ✓ Parsed {len(parsed_manifest.files)} files", file=sys.stderr)
+                
+                return AssetData(
+                    asset=asset,
+                    metadata={'fab_asset': fab_asset},
+                    files=[],
+                    parsed_manifest=parsed_manifest,
+                )
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
         
         # Phase 2: Return metadata only
         return AssetData(
-            asset=asset,  # Actual field name (not source_asset)
-            metadata={
-                'fab_asset': asset.raw_asset,  # Store raw asset for transformer
-            },
-            files=[],  # No files in metadata-only mode
-            parsed_manifest=None,  # Actual field name (not manifest)
+            asset=asset,
+            metadata={'fab_asset': fab_asset},
+            files=[],
+            parsed_manifest=None,
         )
     
     def get_transformer(self) -> Transformer:

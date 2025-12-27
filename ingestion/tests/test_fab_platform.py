@@ -114,6 +114,43 @@ def mock_fab_client(sample_fab_assets):
     return client
 
 
+@pytest.fixture
+def mock_parsed_manifest():
+    """Mock ParsedManifest for testing."""
+    from unittest.mock import Mock
+    
+    manifest = Mock()
+    manifest.version = "1.0"
+    manifest.app_id = "fab-asset-123"
+    manifest.app_name = "Fantasy Models Pack"
+    manifest.build_version = "1.2.3"
+    
+    # Mock file entries
+    file1 = Mock()
+    file1.filename = "Content/Models/Character.uasset"
+    file1.file_hash = "abc123def456"
+    
+    # Mock chunk parts for size calculation
+    chunk1 = Mock()
+    chunk1.size = 1024 * 1024  # 1 MB
+    chunk_part1 = Mock()
+    chunk_part1.chunks = [chunk1]
+    file1.file_chunk_parts = [chunk_part1]
+    
+    file2 = Mock()
+    file2.filename = "Content/Textures/Diffuse.uasset"
+    file2.file_hash = "789xyz"
+    chunk2 = Mock()
+    chunk2.size = 512 * 1024  # 512 KB
+    chunk_part2 = Mock()
+    chunk_part2.chunks = [chunk2]
+    file2.file_chunk_parts = [chunk_part2]
+    
+    manifest.files = [file1, file2]
+    
+    return manifest
+
+
 # ============================================================================
 # TestFabSourceMocked
 # ============================================================================
@@ -163,14 +200,6 @@ class TestFabSourceMocked:
         assert 'fab_asset' in asset_data.metadata
         assert asset_data.files == []
         assert asset_data.parsed_manifest is None
-    
-    def test_get_asset_data_download_not_implemented(self, mock_fab_client):
-        """Test that download=True raises NotImplementedError in Phase 2."""
-        source = FabSource(mock_fab_client)
-        asset = source.get_asset("asset-1")
-        
-        with pytest.raises(NotImplementedError, match="Phase 3"):
-            source.get_asset_data(asset, download=True)
     
     def test_library_lazy_loaded(self, mock_fab_client):
         """Test that library is only fetched once."""
@@ -396,6 +425,125 @@ class TestFabIntegration:
         
         assert manifest['pack_name'] == "SciFi Materials"
         validate_manifest(manifest)
+
+
+# ============================================================================
+# TestFabTransformerWithManifests
+# ============================================================================
+
+class TestFabTransformerWithManifests:
+    """Tests for manifest parsing (Phase 3)."""
+    
+    def test_parse_manifest_files(self, sample_fab_assets, mock_parsed_manifest):
+        """Test parsing manifest into individual assets."""
+        transformer = FabTransformer()
+        fab_asset = sample_fab_assets[0]
+        source_asset = FabAssetAdapter(fab_asset)
+        
+        asset_data = AssetData(
+            asset=source_asset,
+            metadata={'fab_asset': fab_asset},
+            files=[],
+            parsed_manifest=mock_parsed_manifest,
+        )
+        
+        manifest = transformer.transform(source_asset, asset_data)
+        
+        # Should have 2 assets (from mock_parsed_manifest)
+        assert len(manifest['assets']) == 2
+        
+        # Check first asset
+        asset1 = manifest['assets'][0]
+        assert asset1['relative_path'] == "Content/Models/Character.uasset"
+        assert asset1['file_type'] == 'uasset'
+        assert asset1['size_bytes'] == 1024 * 1024
+        assert 'file_hash' in asset1['metadata']
+        assert asset1['metadata']['file_hash'] == 'abc123def456'
+        assert asset1['local_tags'] == ['Content', 'Models']
+        
+        # Check second asset
+        asset2 = manifest['assets'][1]
+        assert asset2['relative_path'] == "Content/Textures/Diffuse.uasset"
+        assert asset2['size_bytes'] == 512 * 1024
+    
+    def test_calculate_file_size(self, mock_parsed_manifest):
+        """Test file size calculation from chunks."""
+        transformer = FabTransformer()
+        
+        # First file should be 1 MB
+        size1 = transformer._calculate_file_size(mock_parsed_manifest.files[0])
+        assert size1 == 1024 * 1024
+        
+        # Second file should be 512 KB
+        size2 = transformer._calculate_file_size(mock_parsed_manifest.files[1])
+        assert size2 == 512 * 1024
+    
+    def test_transform_with_manifest_validates_schema(self, sample_fab_assets, mock_parsed_manifest):
+        """Test that manifests with parsed files validate against schema."""
+        transformer = FabTransformer()
+        fab_asset = sample_fab_assets[0]
+        source_asset = FabAssetAdapter(fab_asset)
+        
+        asset_data = AssetData(
+            asset=source_asset,
+            metadata={'fab_asset': fab_asset},
+            files=[],
+            parsed_manifest=mock_parsed_manifest,
+        )
+        
+        manifest = transformer.transform(source_asset, asset_data)
+        
+        # Should validate against schema
+        validate_manifest(manifest)
+
+
+# ============================================================================
+# TestDownloadStrategyIntegration
+# ============================================================================
+
+class TestDownloadStrategyIntegration:
+    """Integration tests for download strategies."""
+    
+    def test_metadata_only_strategy(self, mock_fab_client):
+        """Test metadata_only strategy (Phase 2 behavior)."""
+        from game_asset_tracker_ingestion import SourceRegistry
+        
+        pipeline = SourceRegistry.create_pipeline(
+            'fab',
+            client=mock_fab_client,
+            download_strategy='metadata_only'
+        )
+        
+        manifest = next(pipeline.generate_manifests())
+        
+        # Should have 1 placeholder asset
+        assert len(manifest['assets']) == 1
+        assert manifest['assets'][0]['file_type'] == 'marketplace'
+        assert manifest['assets'][0]['size_bytes'] == 0
+    
+    def test_manifests_only_strategy(self, mock_fab_client, mock_parsed_manifest):
+        """Test manifests_only strategy (Phase 3 behavior)."""
+        from game_asset_tracker_ingestion import SourceRegistry
+        from unittest.mock import Mock
+        
+        # Mock manifest downloading
+        manifest_result = Mock()
+        manifest_result.load.return_value = mock_parsed_manifest
+        mock_fab_client.download_manifest.return_value = manifest_result
+        
+        pipeline = SourceRegistry.create_pipeline(
+            'fab',
+            client=mock_fab_client,
+            download_strategy='manifests_only'
+        )
+        
+        manifest = next(pipeline.generate_manifests())
+        
+        # Should have 2 assets (from parsed manifest)
+        assert len(manifest['assets']) == 2
+        assert manifest['assets'][0]['file_type'] == 'uasset'
+        assert manifest['assets'][0]['size_bytes'] > 0
+        assert manifest['assets'][0]['size_bytes'] == 1024 * 1024
 
 
 # ============================================================================

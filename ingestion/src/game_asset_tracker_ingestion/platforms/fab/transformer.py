@@ -4,12 +4,14 @@ Converts Fab assets to game-asset-tracker manifest format.
 """
 
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from fab_api_client import Asset as FabAsset
 
 from ...core.types import Asset as ManifestAsset
 from ...core.types import Manifest
+from ...scanner import derive_local_tags
 from ...sources.base import AssetData, SourceAsset
 from ...transformers.base import Transformer
 
@@ -69,9 +71,13 @@ class FabTransformer(Transformer):
         # Global tags (empty for now, TODO: extract from listing categories)
         global_tags = kwargs.get('global_tags', [])
         
-        # Phase 2: Create single placeholder asset entry
-        # This represents the marketplace asset as a whole
-        placeholder_asset = self._create_placeholder_asset(fab_asset)
+        # Phase 3: Check if manifest is available
+        if data.parsed_manifest:
+            # Parse individual files from manifest
+            assets = self._parse_manifest_files(data.parsed_manifest, fab_asset)
+        else:
+            # Phase 2: Create single placeholder asset entry
+            assets = [self._create_placeholder_asset(fab_asset)]
         
         # Build manifest
         manifest: Manifest = {
@@ -81,7 +87,7 @@ class FabTransformer(Transformer):
             'source': 'Fab - Epic Games',
             'license_link': license_link,
             'global_tags': global_tags,
-            'assets': [placeholder_asset],
+            'assets': assets,
         }
         
         return manifest
@@ -154,3 +160,74 @@ class FabTransformer(Transformer):
         }
         
         return asset
+    
+    def _parse_manifest_files(
+        self,
+        parsed_manifest,
+        fab_asset: FabAsset
+    ) -> list[ManifestAsset]:
+        """Parse individual files from Fab manifest.
+        
+        Phase 3: Converts ParsedManifest.files into ManifestAsset entries.
+        
+        Args:
+            parsed_manifest: ParsedManifest from fab-api-client
+            fab_asset: Original Fab asset for context
+            
+        Returns:
+            List of ManifestAsset entries, one per file in manifest
+        """
+        assets: list[ManifestAsset] = []
+        
+        for manifest_file in parsed_manifest.files:
+            # Extract file extension (lowercase, no dot)
+            file_path = Path(manifest_file.filename)
+            file_type = file_path.suffix.lstrip('.').lower()
+            if not file_type:
+                file_type = 'unknown'
+            
+            # Calculate total file size from chunk parts
+            size_bytes = self._calculate_file_size(manifest_file)
+            
+            # Derive local tags from file path
+            local_tags = derive_local_tags(file_path)
+            
+            # Build metadata for this file
+            metadata: dict[str, str] = {
+                'file_hash': manifest_file.file_hash,
+                'build_version': parsed_manifest.build_version,
+                'app_name': parsed_manifest.app_name,
+            }
+            
+            # Create asset entry
+            asset: ManifestAsset = {
+                'relative_path': manifest_file.filename,
+                'file_type': file_type,
+                'size_bytes': size_bytes,
+                'metadata': metadata,
+                'local_tags': local_tags,
+            }
+            
+            assets.append(asset)
+        
+        return assets
+    
+    def _calculate_file_size(self, manifest_file) -> int:
+        """Calculate total file size from chunk parts.
+        
+        Fab manifests split files into chunks for downloading.
+        We sum all chunk sizes to get total file size.
+        
+        Args:
+            manifest_file: ManifestFile from ParsedManifest
+            
+        Returns:
+            Total file size in bytes
+        """
+        total_size = 0
+        
+        for chunk_part in manifest_file.file_chunk_parts:
+            for chunk in chunk_part.chunks:
+                total_size += chunk.size
+        
+        return total_size
