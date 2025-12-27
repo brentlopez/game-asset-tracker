@@ -4,9 +4,65 @@ Tools for ingesting game asset data into the Game Asset Tracking System.
 
 ## Overview
 
-This directory contains the filesystem scanner for generating JSON manifests from local asset directories.
+This directory contains the **game-asset-tracker-ingestion** library - a modular, extensible tool for generating JSON manifests from multiple sources including local directories and online marketplaces.
 
-## Filesystem Ingestion (`ingest.py`)
+## Library Usage
+
+The ingestion library can be used programmatically or via CLI.
+
+### Basic Filesystem Scan
+
+```python
+from pathlib import Path
+from game_asset_tracker_ingestion import SourceRegistry
+
+# Create pipeline
+pipeline = SourceRegistry.create_pipeline(
+    'filesystem',
+    path=Path('/path/to/assets')
+)
+
+# Generate manifests
+for manifest in pipeline.generate_manifests():
+    print(f"Pack: {manifest['pack_name']}")
+    print(f"Files: {len(manifest['assets'])}")
+```
+
+### Fab Marketplace
+
+```python
+from fab_api_client import FabClient
+from game_asset_tracker_ingestion import SourceRegistry
+
+# Setup Fab client with authentication
+# Note: Authentication requires setup - see fab-api-client documentation
+# Related projects:
+# - fab-api-client: https://github.com/brentlopez/fab-api-client
+# - asset-marketplace-client-core: https://github.com/brentlopez/asset-marketplace-client-core
+client = FabClient(auth=auth_provider)
+
+# Create pipeline
+pipeline = SourceRegistry.create_pipeline(
+    'fab',
+    client=client,
+    download_strategy='metadata_only'  # or 'manifests_only'
+)
+
+# Generate manifests
+for manifest in pipeline.generate_manifests():
+    # Process manifest
+    pass
+```
+
+### Custom Sources
+
+See [EXTENDING.md](EXTENDING.md) for detailed guide on implementing custom sources.
+
+**Example scripts**: Check the `examples/` directory for runnable demonstrations.
+
+---
+
+## CLI Usage - Filesystem Ingestion
 
 Recursively scans a directory tree and generates a standardized JSON manifest containing:
 - Pack-level metadata (name, source, tags, license)
@@ -22,22 +78,44 @@ Recursively scans a directory tree and generates a standardized JSON manifest co
 
 ### Setup
 
-1. **Clone or navigate to the repository:**
-   ```bash
-   cd /path/to/game-asset-tracker/ingestion
-   ```
+```bash
+# Filesystem only
+uv sync
 
-2. **Install dependencies:**
-   ```bash
-   uv sync
-   ```
+# With Fab marketplace support
+uv sync --extra fab
 
-   This will create a virtual environment in `.venv/` and install all required dependencies including `jsonschema` and `mutagen`.
+# With all marketplace support  
+uv sync --extra all
+```
 
-3. **Verify installation:**
-   ```bash
-   uv run ingest --help
-   ```
+This will create a virtual environment in `.venv/` and install the appropriate dependencies.
+
+### Verify Installation
+
+```bash
+uv run ingest --help
+```
+
+## Architecture
+
+The library follows a modular, extensible architecture:
+
+- **Sources**: Abstract data retrieval from various origins (filesystem, APIs, databases)
+- **Transformers**: Convert source-specific data to standardized manifests
+- **Pipeline**: Orchestrates the source → transformation → output workflow
+- **Registry**: Manages and auto-discovers available sources
+
+**Current sources**:
+- `filesystem`: Local directory scanning
+- `fab`: Fab marketplace integration (requires `fab-api-client`)
+
+**Extending**: See [EXTENDING.md](EXTENDING.md) for detailed architecture documentation and guide to implementing custom sources.
+
+**Related projects**:
+- [fab-api-client](https://github.com/brentlopez/fab-api-client): Fab marketplace client library
+- [uas-api-client](https://github.com/brentlopez/uas-api-client): Unity Asset Store client library
+- [asset-marketplace-client-core](https://github.com/brentlopez/asset-marketplace-client-core): Architecture patterns for marketplace adapters
 
 ## Usage
 

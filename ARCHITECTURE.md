@@ -6,11 +6,17 @@ The Game Asset Tracking System is a hybrid solution for managing game developmen
 
 ## System Components
 
-### 1. Ingestion Scripts (Python)
+### 1. Ingestion Library (Python)
 - **Location:** `ingestion/`
-- **Purpose:** Scan local NAS or folder structures and generate standardized JSON manifests
-- **Language:** Python 3.x
+- **Purpose:** Generate standardized JSON manifests from multiple sources
+- **Language:** Python 3.11+
+- **Architecture:** Modular, extensible pipeline with pluggable sources
+- **Sources:** 
+  - Filesystem (local directories, NAS)
+  - Marketplaces (Fab, Unity Asset Store)
+  - Custom sources (extensible via `Source` interface)
 - **Output:** JSON files conforming to the strict schema (see Data Model section)
+- **Documentation:** See `ingestion/README.md` and `ingestion/EXTENDING.md`
 
 ### 2. Obsidian Plugin (TypeScript/React)
 - **Location:** `obsidian-plugin/`

@@ -4,20 +4,29 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-This directory contains the **game-asset-tracker-ingestion** Python package - a modern, type-safe tool for scanning asset directories and generating validated JSON manifests.
+This directory contains the **game-asset-tracker-ingestion** Python package - a modern, type-safe, modular library for generating validated JSON manifests from multiple sources.
 
-### Filesystem Ingestion
+### Multi-Source Architecture
 
-Scans asset directories (e.g., on a NAS or local filesystem) and generates standardized JSON manifests that describe Asset Packs and their individual files.
+The library supports ingestion from:
+- **Filesystem**: Local directory scanning (NAS, local drives)
+- **Marketplaces**: Fab marketplace (via fab-api-client), Unity Asset Store (planned)
+- **Custom sources**: Extensible architecture for third-party integrations
 
 **Role in the larger system:** This package is the first step in a one-way data flow:
 ```
-Python Package (scans filesystem)
-    ↓ generates
-JSON Manifest (validated against schema)
+Multiple Sources (filesystem, Fab, UAS, custom)
+    ↓ unified pipeline
+JSON Manifests (validated against schema)
     ↓ imported via
 Obsidian Plugin (creates SQLite index + Markdown notes)
 ```
+
+**Key architectural components**:
+- `Source` ABC: Interface for data retrieval
+- `Transformer` ABC: Converts source data to standardized manifests
+- `IngestionPipeline`: Orchestrates source → transformation → output
+- `SourceRegistry`: Auto-discovers and manages available sources
 
 
 ## Repository Structure
@@ -26,15 +35,40 @@ Obsidian Plugin (creates SQLite index + Markdown notes)
 ingestion/
 ├── src/
 │   └── game_asset_tracker_ingestion/
-│       ├── __init__.py         # Package exports
-│       ├── cli.py              # CLI entry point
-│       ├── scanner.py          # Directory scanning & security
-│       ├── metadata.py         # Format-specific metadata extraction
-│       ├── validator.py        # JSON schema validation
-│       └── types.py            # TypedDict definitions
-├── tests/
-│   ├── __init__.py
-│   └── test_scanner.py         # Security & functionality tests
+│       ├── __init__.py         # Package exports & auto-discovery
+│       ├── cli.py              # CLI entry point (legacy)
+│       ├── scanner.py          # Filesystem utilities (legacy)
+│       ├── pipeline.py         # Main ingestion pipeline
+│       ├── registry.py         # Source factory registry
+│       ├── core/               # Core types and utilities
+│       │   ├── types.py        # TypedDict definitions
+│       │   ├── validator.py    # JSON schema validation
+│       │   └── metadata.py     # Format-specific metadata extraction
+│       ├── sources/            # Base abstractions
+│       │   └── base.py         # Source, SourceAsset, AssetData
+│       ├── transformers/       # Base transformer
+│       │   └── base.py         # Transformer ABC
+│       └── platforms/          # Source implementations
+│           ├── filesystem/     # Local directory scanning
+│           │   ├── source.py
+│           │   └── transformer.py
+│           └── fab/            # Fab marketplace integration
+│               ├── source.py
+│               └── transformer.py
+├── tests/                      # Test suite
+│   ├── test_scanner.py         # Security & filesystem tests
+│   └── test_fab_platform.py    # Fab platform tests
+├── examples/                   # Example scripts
+│   ├── filesystem_basic.py
+│   ├── fab_metadata_only.py
+│   ├── fab_with_manifests.py
+│   └── custom_source.py
+├── docs/                       # Phase documentation
+│   ├── PHASE_2_FAB_INTEGRATION.md
+│   ├── PHASE_3_DOWNLOAD_STRATEGY.md
+│   └── PHASE_4_DOCUMENTATION.md
+├── EXTENDING.md                # Developer guide for custom sources
+├── TODO.md                     # Planned future enhancements
 ├── pyproject.toml              # Project configuration (uv format)
 ├── uv.lock                     # Locked dependencies
 ├── README.md                   # User documentation
@@ -56,9 +90,41 @@ uv sync --group dev
 - Runtime: `jsonschema` (required), `mutagen` (optional for audio metadata)
 - Dev: `ruff`, `mypy`, `pytest`, `pytest-cov`, `types-jsonschema`
 
-### Running the Script
+### Library Usage
 
-**Basic usage:**
+**Filesystem scanning:**
+```python
+from pathlib import Path
+from game_asset_tracker_ingestion import SourceRegistry
+
+pipeline = SourceRegistry.create_pipeline('filesystem', path=Path('/path/to/assets'))
+for manifest in pipeline.generate_manifests():
+    print(f"Generated: {manifest['pack_name']}")
+```
+
+**Fab marketplace** (requires `uv sync --extra fab`):
+```python
+from fab_api_client import FabClient
+from game_asset_tracker_ingestion import SourceRegistry
+
+# Setup authentication (see fab-api-client docs)
+client = FabClient(auth=auth_provider)
+
+pipeline = SourceRegistry.create_pipeline(
+    'fab',
+    client=client,
+    download_strategy='metadata_only'  # or 'manifests_only'
+)
+
+for manifest in pipeline.generate_manifests():
+    print(f"Generated: {manifest['pack_name']}")
+```
+
+**Custom sources**: See [EXTENDING.md](EXTENDING.md) for implementation guide.
+
+### CLI Usage (Legacy)
+
+**Basic CLI usage:**
 ```bash
 uv run ingest \
   --path /path/to/assets \
@@ -124,6 +190,32 @@ uv run pytest tests/test_scanner.py -v
 **Note:** Schema validation is **automatically performed** by the CLI before outputting JSON. Invalid manifests will fail with detailed error messages.
 
 ## Architecture
+
+### Multi-Source Design
+
+The library uses an extensible, plugin-based architecture:
+
+**Core abstractions** (`sources/base.py`, `transformers/base.py`):
+- `SourceAsset` Protocol: Minimal interface (`uid`, `title`) that all assets must implement
+- `Source` ABC: Interface for retrieving assets from any data source
+- `Transformer` ABC: Converts source-specific data to standardized manifests
+- `AssetData`: Container for raw data before transformation
+
+**Pipeline** (`pipeline.py`):
+- `IngestionPipeline`: Platform-agnostic orchestrator
+- Calls `source.list_assets()` → `source.get_asset_data()` → `transformer.transform()`
+- Supports filtering and download strategies
+
+**Registry** (`registry.py`):
+- `SourceRegistry`: Manages factory functions for creating sources
+- Auto-discovers platforms in `platforms/` directory via `discover_platforms()`
+- Platforms self-register when imported (see `platforms/*/` __init__.py files)
+
+**Current implementations**:
+- `platforms/filesystem/`: Scans local directories
+- `platforms/fab/`: Integrates with Fab marketplace via fab-api-client
+
+**Extending**: See [EXTENDING.md](EXTENDING.md) for guide on implementing custom sources.
 
 ### Core Concepts
 
@@ -265,6 +357,28 @@ Possible enhancements:
 - Normalize casing or formatting
 - Apply stop-word filtering
 - Add tests in `tests/test_scanner.py`
+
+### Implementing a Custom Source
+
+For detailed guidance, see [EXTENDING.md](EXTENDING.md).
+
+**Quick overview**:
+
+1. **Create asset adapter** implementing `SourceAsset` protocol (requires `uid` and `title` properties)
+2. **Implement `Source` ABC** with `list_assets()`, `get_asset()`, `get_asset_data()`, `get_transformer()`
+3. **Implement `Transformer` ABC** with `transform()` method
+4. **Register source** via `SourceRegistry.register_factory(name, factory_fn)`
+5. **Auto-discovery**: Place in `platforms/{name}/` directory with `__init__.py` that registers the source
+
+**Reference implementations**:
+- Simple: `platforms/filesystem/` - Direct directory scanning
+- API-based: `platforms/fab/` - Marketplace integration with authentication
+- Template: `examples/custom_source.py` - Minimal working example
+
+**Related projects**:
+- [asset-marketplace-client-core](https://github.com/brentlopez/asset-marketplace-client-core): Architecture patterns for marketplace adapters
+- [fab-api-client](https://github.com/brentlopez/fab-api-client): Fab marketplace client
+- [uas-api-client](https://github.com/brentlopez/uas-api-client): Unity Asset Store client
 
 ### Adding New CLI Arguments
 

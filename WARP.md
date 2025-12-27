@@ -7,18 +7,20 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 This is a hybrid system for managing game development assets at scale. It combines:
 - **Obsidian** for high-level Asset Pack organization (Markdown notes, linking, tagging)
 - **SQLite** for granular file-level search across thousands of individual asset files
-- **Python scripts** for automated ingestion from asset directories
+- **Python ingestion library** for automated manifest generation from multiple sources
 - **TypeScript/Obsidian plugin** for bridging JSON manifests to the database and notes
 
-The project is currently **scaffolded** with architecture defined but not yet implemented.
+**Current status**: 
+- ✅ Ingestion library implemented (filesystem, Fab marketplace, extensible architecture)
+- 🚧 Obsidian plugin scaffolded but not yet implemented
 
 ## Critical Architecture Concepts
 
 ### Data Flow (One-Way Sync)
 ```
-Python Script (scans filesystem)
-    ↓ generates
-JSON Manifest (strict schema)
+Multiple Sources (filesystem, Fab, UAS, custom)
+    ↓ ingestion pipeline
+JSON Manifests (strict schema)
     ↓ imported via
 Obsidian Plugin
     ↓ simultaneously creates
@@ -57,17 +59,21 @@ schemas/             # THE CONTRACT: Formal JSON Schema + examples
 
 ## Development Guidelines
 
-### For Python Ingestion Scripts
-- Target: Python 3.x
+### For Python Ingestion Library
+- **Status**: ✅ **Implemented** - See `ingestion/` directory
+- Target: Python 3.11+ with modern tooling (uv, ruff, mypy)
+- **Architecture**: Modular pipeline with pluggable sources
 - Must generate JSON conforming to `schemas/manifest.schema.json`
-- **CRITICAL**: Always validate output using `jsonschema` library before saving
-- Key tasks:
-  - Recursively scan asset directories
-  - Generate UUIDs (lowercase, hyphenated format)
-  - Normalize file extensions to lowercase (`.PNG` → `png`)
-  - Extract file metadata (size in bytes, format-specific data as strings)
-  - Derive tags from folder structure
-  - Validate and output JSON only if it passes schema validation
+- **Available sources**:
+  - `filesystem`: Local directory scanning
+  - `fab`: Fab marketplace integration (via fab-api-client)
+  - Custom sources via extensible interface
+- **Key features**:
+  - Auto-discovery of source plugins
+  - Schema validation built-in
+  - Multiple download strategies (metadata-only, manifests-only)
+  - Type-safe with full mypy strict mode
+- **Documentation**: See `ingestion/README.md`, `ingestion/EXTENDING.md`, `ingestion/TODO.md`
 
 ### For Obsidian Plugin
 - Target: TypeScript with React for UI components
@@ -110,17 +116,30 @@ schemas/             # THE CONTRACT: Formal JSON Schema + examples
 
 ## Development Commands
 
-Since the project is scaffolded but not implemented, there are no build/test commands yet.
+### Python Ingestion Library (✅ Implemented)
 
-### When Python Scripts Are Implemented
-Expected commands will likely be:
 ```bash
-# Run ingestion script
-python ingestion/ingest.py --path /path/to/assets --output output.json
-
 # Install dependencies
-pip install -r ingestion/requirements.txt
+cd ingestion && uv sync
+
+# Install with Fab support
+cd ingestion && uv sync --extra fab
+
+# CLI usage (legacy filesystem scanning)
+uv run ingest --path /path/to/assets --name "Pack Name" --source "Source"
+
+# Library usage (programmatic)
+python -c "from game_asset_tracker_ingestion import SourceRegistry; ..."
+
+# Run tests
+uv run pytest
+
+# Code quality
+uv run ruff check src/
+uv run mypy src/
 ```
+
+See `ingestion/README.md` for complete documentation.
 
 ### When Obsidian Plugin Is Implemented
 Expected commands will likely be:
@@ -173,12 +192,17 @@ See `schemas/README.md` for validation code examples.
 6. **Don't generate Markdown without updating SQLite** - Both must be updated simultaneously
 7. **Don't create orphaned asset records** - Every asset must reference a valid pack_id
 
-## Future Development Priorities (from README)
+## Development Priorities
 
-1. Implement Python ingestion script
-2. Develop Obsidian plugin with SQLite integration
-3. Create JSON Schema validation
-4. Add example manifests and test data
+**Completed**:
+1. ✅ Python ingestion library with multi-source architecture
+2. ✅ JSON Schema validation
+3. ✅ Example manifests and documentation
+
+**In Progress / Planned**:
+1. Develop Obsidian plugin with SQLite integration
+2. Implement Unity Asset Store source (see `ingestion/TODO.md`)
+3. Add advanced filtering and parallel processing (see `ingestion/TODO.md`)
 
 ## Working with This Project
 

@@ -8,14 +8,19 @@ Manage thousands of game assets (3D models, textures, audio, animations) from Un
 
 - **📝 Obsidian** - High-level Asset Pack organization with linking and tagging
 - **🔍 SQLite** - Fast, granular search across individual asset files
-- **🐍 Python Scripts** - Automated ingestion from your asset directories
+- **🐍 Python Library** - Automated manifest generation from multiple sources
 - **🔄 JSON-Based Workflow** - Portable, auditable data exchange
+
+## Current Status
+
+🚀 **Ingestion Library**: ✅ Implemented and ready to use  
+🚧 **Obsidian Plugin**: Scaffolded, awaiting development
 
 ## Quick Start
 
 ### Prerequisites
 
-- Python 3.x
+- Python 3.11+ with uv package manager
 - Node.js and npm (for plugin development)
 - Obsidian (for using the plugin)
 
@@ -25,24 +30,30 @@ Manage thousands of game assets (3D models, textures, audio, animations) from Un
 game-asset-tracker/
 ├── ARCHITECTURE.md          # 📘 Complete system design (READ THIS FIRST)
 ├── README.md                # This file
-├── .gitignore
+├── WARP.md                  # AI assistant guide
 │
-├── ingestion/               # Python scripts for scanning assets
-│   └── (to be developed)
+├── ingestion/               # ✅ Python ingestion library (IMPLEMENTED)
+│   ├── src/                 # Multi-source ingestion pipeline
+│   ├── examples/            # Runnable example scripts
+│   ├── EXTENDING.md         # Guide for implementing custom sources
+│   ├── TODO.md              # Planned enhancements
+│   └── README.md            # Library documentation
 │
-├── obsidian-plugin/        # TypeScript plugin for Obsidian
+├── obsidian-plugin/        # 🚧 TypeScript plugin for Obsidian
 │   └── (to be developed)
 │
 └── schemas/                # Reference schemas and examples
-    └── (to be developed)
+    ├── manifest.schema.json # JSON Schema (Draft 7)
+    ├── example-manifest.json
+    └── README.md
 ```
 
 ## How It Works
 
 ```
-1. Run Python script on your asset folders
+1. Run ingestion library on your sources
            ↓
-2. Script generates JSON manifest
+2. Library generates JSON manifests
            ↓
 3. Import JSON via Obsidian plugin
            ↓
@@ -64,10 +75,12 @@ game-asset-tracker/
 - Search thousands of files instantly
 
 ### 🐍 Flexible Ingestion
+- Multi-source architecture (filesystem, marketplaces, custom)
 - Scan local directories or NAS
+- Integrate with Fab marketplace, Unity Asset Store
 - Extract metadata (dimensions, duration, file size)
 - Auto-generate tags from folder structure
-- Support for Unity, Epic, custom sources
+- Extensible via `Source` interface - add your own sources
 
 ### 📋 Strict Schema
 All data flows through a well-defined JSON schema ensuring consistency and portability.
@@ -82,20 +95,32 @@ All data flows through a well-defined JSON schema ensuring consistency and porta
 ## Documentation
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete system design, workflow, and data model (**start here**)
-- **ingestion/README.md** - Guide for ingestion systems (filesystem scanning and marketplace scraping)
+- **[ingestion/README.md](ingestion/README.md)** - Library usage, installation, CLI reference
+- **[ingestion/EXTENDING.md](ingestion/EXTENDING.md)** - Guide for implementing custom sources
+- **[ingestion/TODO.md](ingestion/TODO.md)** - Planned future enhancements
+- **[schemas/](schemas/)** - JSON Schema, examples, and validation guide
 - **obsidian-plugin/README.md** - Plugin installation and usage (to be developed)
-- **schemas/** - Reference schemas and examples (to be developed)
 
 ## Development Status
 
-🚧 **Project Scaffolded** - Core architecture defined, ready for development.
+### ✅ Completed
 
-### Next Steps
+1. **Python Ingestion Library**
+   - Multi-source architecture (filesystem, Fab marketplace)
+   - Extensible via `Source` interface
+   - Full test coverage and type safety
+   - Example scripts and documentation
 
-1. Implement Python ingestion script
-2. Develop Obsidian plugin with SQLite integration
-3. Create JSON Schema validation
-4. Add example manifests and test data
+2. **JSON Schema & Validation**
+   - Formal JSON Schema (Draft 7)
+   - Example manifests
+   - Validation in Python (jsonschema)
+
+### 🚧 Next Steps
+
+1. Develop Obsidian plugin with SQLite integration
+2. Implement Unity Asset Store source (see `ingestion/TODO.md`)
+3. Add advanced features: filtering, caching, parallel processing
 
 ## Contributing
 
