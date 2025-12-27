@@ -1113,12 +1113,14 @@ for manifest in pipeline.generate_manifests():
 ### Fab Marketplace (requires `uv sync --extra fab`)
 
 ```python
-from fab_api_client import FabClient, CookieAuthProvider
+from fab_egl_adapter import FabEGLAdapter
+from fab_api_client import FabClient
 from game_asset_tracker_ingestion import SourceRegistry
 
-# Setup Fab client
-auth = CookieAuthProvider(cookies={...}, endpoints=...)
-client = FabClient(auth=auth)
+# Setup Fab client via adapter
+adapter = FabEGLAdapter()
+auth_provider = adapter.get_auth_provider()
+client = FabClient(auth=auth_provider)
 
 # Create pipeline
 pipeline = SourceRegistry.create_pipeline(
@@ -1218,22 +1220,16 @@ if __name__ == '__main__':
 
 import json
 from pathlib import Path
-from fab_api_client import FabClient, CookieAuthProvider
+from fab_egl_adapter import FabEGLAdapter
+from fab_api_client import FabClient
 from game_asset_tracker_ingestion import SourceRegistry
 
 def main():
-    # Setup authentication (replace with your cookies)
-    cookies = {
-        'EPIC_SSO': 'your-sso-cookie',
-        'EPIC_BEARER_TOKEN': 'your-bearer-token',
-    }
-    
-    endpoints = {
-        'library': 'https://fab.com/api/v1/library',
-    }
-    
-    auth = CookieAuthProvider(cookies=cookies, endpoints=endpoints)
-    client = FabClient(auth=auth)
+    # Setup authentication via adapter
+    # FabEGLAdapter extracts cookies from Epic Games Launcher
+    adapter = FabEGLAdapter()
+    auth_provider = adapter.get_auth_provider()
+    client = FabClient(auth=auth_provider)
     
     # Create pipeline
     pipeline = SourceRegistry.create_pipeline(

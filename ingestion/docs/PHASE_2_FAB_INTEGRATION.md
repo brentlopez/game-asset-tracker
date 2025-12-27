@@ -123,11 +123,13 @@ Key types and classes used:
 ```python
 from fab_api_client import (
     FabClient,           # Main client class
-    CookieAuthProvider,  # Authentication via browser cookies
+    CookieAuthProvider,  # Authentication via browser cookies (provided by fab-egl-adapter)
     Asset,               # Fab asset with entitlements
     Library,             # User's library collection
 )
 ```
+
+**Note**: In practice, users will obtain `CookieAuthProvider` from `fab-egl-adapter` rather than constructing it manually. See [Authentication Architecture](#authentication-architecture) section below.
 
 #### asset-marketplace-core
 
@@ -190,8 +192,80 @@ uv sync --extra fab
                          ┌──────────────────────┐
                          │     FabClient        │
                          │  (fab-api-client)    │
+                         └──────────┬───────────┘
+                                    │
+                                    │ uses
+                                    ▼
+                         ┌──────────────────────┐
+                         │   AuthProvider       │
+                         │ (CookieAuthProvider) │
+                         └──────────┬───────────┘
+                                    │
+                                    │ provided by
+                                    ▼
+                         ┌──────────────────────┐
+                         │  FabEGLAdapter       │
+                         │ (fab-egl-adapter)    │
+                         │ Extracts cookies     │
+                         │ from EGL install     │
                          └──────────────────────┘
 ```
+
+### Authentication Architecture
+
+The system uses a **three-tier authentication model** to separate concerns:
+
+**Tier 3: Adapter Libraries** (Extract authentication from installed software)
+- `fab-egl-adapter`: Extracts cookies/tokens from Epic Games Launcher installation
+- `uas-adapter`: Extracts tokens from Unity Editor installation
+- Handles platform-specific credential extraction (Windows Registry, macOS plist files, etc.)
+- **Output**: Pre-configured `AuthProvider` instance
+
+**Tier 2: API Client Libraries** (Use authentication to make API calls)
+- `fab-api-client`: Uses `CookieAuthProvider` to authenticate Fab marketplace requests
+- `uas-api-client`: Uses `TokenAuthProvider` to authenticate Unity Asset Store requests
+- Handle request signing, token refresh, rate limiting, error handling
+- **Output**: Authenticated `FabClient` or `UASClient` instance
+
+**Tier 1: Ingestion Library** (Consumes pre-authenticated clients)
+- `game-asset-tracker-ingestion`: Accepts pre-configured clients from Tier 2
+- Platform-agnostic - doesn't know about authentication mechanisms
+- Focuses solely on data transformation and manifest generation
+- **Input**: Already-authenticated client instances
+
+**Why this separation matters:**
+
+1. **Separation of Concerns**: Ingestion library doesn't need to understand platform-specific auth
+2. **Testability**: Each tier can be mocked/tested independently
+3. **Reusability**: Adapter libraries can be used by other tools (not just ingestion)
+4. **Security**: Credential extraction logic is isolated in adapters
+5. **Flexibility**: Users can provide clients authenticated by any method
+
+**Example authentication flow:**
+
+```python
+# Tier 3: Adapter extracts credentials from EGL
+from fab_egl_adapter import FabEGLAdapter
+
+adapter = FabEGLAdapter()
+auth_provider = adapter.get_auth_provider()  # CookieAuthProvider with cookies
+
+# Tier 2: Client uses auth to make API calls
+from fab_api_client import FabClient
+
+client = FabClient(auth=auth_provider)
+library = client.get_library()  # Authenticated request
+
+# Tier 1: Ingestion uses client to generate manifests
+from game_asset_tracker_ingestion import SourceRegistry
+
+pipeline = SourceRegistry.create_pipeline('fab', client=client)
+for manifest in pipeline.generate_manifests():
+    # Process manifest...
+    pass
+```
+
+**Note**: The ingestion library **only sees the client** - it never touches adapters or auth providers directly. This keeps the ingestion code clean and platform-agnostic.
 
 ### Data Flow
 
@@ -373,9 +447,11 @@ class FabSource(Source):
     Phase 2: Metadata-only mode. Does not download manifests or files.
     
     Example:
-        >>> from fab_api_client import FabClient, CookieAuthProvider
-        >>> auth = CookieAuthProvider(cookies={...}, endpoints=...)
-        >>> client = FabClient(auth=auth)
+        >>> from fab_egl_adapter import FabEGLAdapter
+        >>> from fab_api_client import FabClient
+        >>> adapter = FabEGLAdapter()
+        >>> auth_provider = adapter.get_auth_provider()
+        >>> client = FabClient(auth=auth_provider)
         >>> source = FabSource(client)
         >>> assets = list(source.list_assets())
     """
@@ -384,8 +460,9 @@ class FabSource(Source):
         """Initialize Fab source with authenticated client.
         
         Args:
-            client: Authenticated FabClient instance. User is responsible
-                   for authentication (via CookieAuthProvider, etc.)
+            client: Authenticated FabClient instance. Users typically obtain
+                   this via fab-egl-adapter.get_auth_provider() followed by
+                   FabClient(auth=auth_provider).
         """
         self.client = client
         self._library: Optional[Library] = None
@@ -1145,12 +1222,14 @@ uv run pytest tests/test_fab_platform.py::TestFabGracefulDegradation -v
 
 3. **Pipeline Creation**
    ```python
-   from fab_api_client import FabClient, CookieAuthProvider
+   from fab_egl_adapter import FabEGLAdapter
+   from fab_api_client import FabClient
    from game_asset_tracker_ingestion import SourceRegistry
    
-   # Setup client (requires valid auth)
-   auth = CookieAuthProvider(cookies={...}, endpoints=...)
-   client = FabClient(auth=auth)
+   # Setup authentication via adapter
+   adapter = FabEGLAdapter()
+   auth_provider = adapter.get_auth_provider()
+   client = FabClient(auth=auth_provider)
    
    # Create pipeline
    pipeline = SourceRegistry.create_pipeline('fab', client=client)
@@ -1219,32 +1298,31 @@ uv run pytest tests/test_fab_platform.py::TestFabGracefulDegradation -v
 
 Prerequisites:
 - fab-api-client installed: uv sync --extra fab
-- Valid Fab authentication cookies
+- fab-egl-adapter installed (for authentication)
+- Epic Games Launcher installed with active session
 """
 
 import json
 from pathlib import Path
-from fab_api_client import FabClient, CookieAuthProvider
+from fab_egl_adapter import FabEGLAdapter
+from fab_api_client import FabClient
 from game_asset_tracker_ingestion import SourceRegistry
 
 def main():
-    # 1. Setup authentication
-    # See fab-api-client docs for obtaining cookies from browser
-    cookies = {
-        'EPIC_SSO': 'your-sso-cookie',
-        'EPIC_BEARER_TOKEN': 'your-bearer-token',
-        # ... other required cookies
-    }
+    # 1. Setup authentication via adapter
+    # FabEGLAdapter extracts cookies from Epic Games Launcher installation
+    try:
+        adapter = FabEGLAdapter()
+        auth_provider = adapter.get_auth_provider()
+    except Exception as e:
+        print(f"Error: Could not extract authentication from EGL: {e}")
+        print("Ensure Epic Games Launcher is installed and you're logged in.")
+        return
     
-    endpoints = {
-        'library': 'https://fab.com/api/v1/library',
-        # ... other endpoints from fab-api-client
-    }
+    # 2. Create authenticated client
+    client = FabClient(auth=auth_provider)
     
-    auth = CookieAuthProvider(cookies=cookies, endpoints=endpoints)
-    client = FabClient(auth=auth)
-    
-    # 2. Create pipeline
+    # 3. Create pipeline
     print("Creating Fab pipeline...")
     pipeline = SourceRegistry.create_pipeline(
         'fab',
@@ -1252,11 +1330,11 @@ def main():
         download_strategy='metadata_only'  # Phase 2: metadata only
     )
     
-    # 3. Setup output directory
+    # 4. Setup output directory
     output_dir = Path("manifests/fab")
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # 4. Generate manifests
+    # 5. Generate manifests
     print("Generating manifests...")
     count = 0
     
@@ -1315,21 +1393,43 @@ for manifest in pipeline.generate_manifests():
 **Problem**: FabClient requires valid authentication cookies that expire.
 
 **Solution**:
-- Users must handle authentication externally
-- Use `fab-api-client`'s `CookieAuthProvider`
-- Consider implementing token refresh in application code
+- Use `fab-egl-adapter` to automatically extract fresh cookies from EGL
+- Adapter handles cookie refresh and expiration detection
 - Provide clear error messages when auth fails:
 
 ```python
+from fab_egl_adapter import FabEGLAdapter
+from fab_api_client import FabClient
+from game_asset_tracker_ingestion import SourceRegistry
+
 try:
+    # Adapter extracts authentication from EGL
+    adapter = FabEGLAdapter()
+    auth_provider = adapter.get_auth_provider()
+    client = FabClient(auth=auth_provider)
+    
+    # Create pipeline and generate manifests
     pipeline = SourceRegistry.create_pipeline('fab', client=client)
     list(pipeline.generate_manifests())
 except Exception as e:
     if 'authentication' in str(e).lower() or '401' in str(e):
-        print("Error: Authentication failed. Please refresh your cookies.")
-        print("See fab-api-client documentation for authentication setup.")
+        print("Error: Authentication failed.")
+        print("Ensure Epic Games Launcher is installed and you're logged in.")
+        print("Try restarting EGL and logging in again.")
     else:
         raise
+```
+
+**Alternative**: For testing or non-EGL environments, you can still manually provide auth:
+
+```python
+from fab_api_client import FabClient, CookieAuthProvider
+
+# Manual authentication (not recommended for production)
+cookies = {'EPIC_SSO': '...', 'EPIC_BEARER_TOKEN': '...'}
+endpoints = {'library': 'https://fab.com/api/v1/library'}
+auth_provider = CookieAuthProvider(cookies=cookies, endpoints=endpoints)
+client = FabClient(auth=auth_provider)
 ```
 
 ### Large Libraries

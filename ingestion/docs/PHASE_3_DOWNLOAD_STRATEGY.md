@@ -765,12 +765,14 @@ class TestDownloadStrategyIntegration:
 ### Manual Testing
 
 ```python
-from fab_api_client import FabClient, CookieAuthProvider
+from fab_egl_adapter import FabEGLAdapter
+from fab_api_client import FabClient
 from game_asset_tracker_ingestion import SourceRegistry
 
-# Setup client
-auth = CookieAuthProvider(cookies={...}, endpoints=...)
-client = FabClient(auth=auth)
+# Setup client via adapter
+adapter = FabEGLAdapter()
+auth_provider = adapter.get_auth_provider()
+client = FabClient(auth=auth_provider)
 
 # Test metadata-only (Phase 2)
 pipeline_meta = SourceRegistry.create_pipeline(
@@ -815,13 +817,15 @@ for asset in manifest_full['assets'][:5]:
 
 import json
 from pathlib import Path
-from fab_api_client import FabClient, CookieAuthProvider
+from fab_egl_adapter import FabEGLAdapter
+from fab_api_client import FabClient
 from game_asset_tracker_ingestion import SourceRegistry
 
 def main():
-    # Setup
-    auth = CookieAuthProvider(cookies={...}, endpoints=...)
-    client = FabClient(auth=auth)
+    # Setup authentication via adapter
+    adapter = FabEGLAdapter()
+    auth_provider = adapter.get_auth_provider()
+    client = FabClient(auth=auth_provider)
     
     # Create pipeline with manifest downloading
     pipeline = SourceRegistry.create_pipeline(

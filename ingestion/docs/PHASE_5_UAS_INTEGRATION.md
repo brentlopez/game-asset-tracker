@@ -81,21 +81,37 @@ Phase 5 validates these architectural decisions:
 
 ### Expected API Differences
 
-**Fab client pattern**:
+**Fab client pattern (with adapter)**:
 ```python
-client = FabClient(auth=CookieAuthProvider(...))
+# Tier 3: Extract authentication
+from fab_egl_adapter import FabEGLAdapter
+adapter = FabEGLAdapter()
+auth_provider = adapter.get_auth_provider()  # CookieAuthProvider
+
+# Tier 2: Use authenticated client
+client = FabClient(auth=auth_provider)
 library = client.get_library()
 for asset in library.assets:
     manifest = client.download_manifest(asset, temp_dir)
 ```
 
-**Expected UAS client pattern**:
+**Expected UAS client pattern (with adapter)**:
 ```python
-client = UASClient(auth=TokenAuthProvider(...))
+# Tier 3: Extract authentication
+from uas_adapter import UASAdapter
+adapter = UASAdapter()
+auth_provider = adapter.get_auth_provider()  # TokenAuthProvider
+
+# Tier 2: Use authenticated client
+client = UASClient(auth=auth_provider)
 collection = client.get_owned_products()
 for product in collection.products:
     manifest = client.download_product_manifest(product, temp_dir)
 ```
+
+**Key Difference**: Both use adapters but extract different auth types:
+- **Fab**: `fab-egl-adapter` → `CookieAuthProvider` (cookies from Epic Games Launcher)
+- **UAS**: `uas-adapter` → `TokenAuthProvider` (tokens from Unity Editor installation)
 
 ### Metadata Field Mapping
 
