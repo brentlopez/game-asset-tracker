@@ -988,14 +988,18 @@ all = [
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "fab-api-client" },
+    { name = "fab-egl-adapter" },
+    { name = "uas-adapter" },
     { name = "uas-api-client" },
 ]
 fab = [
     { name = "fab-api-client" },
+    { name = "fab-egl-adapter" },
 ]
 uas = [
     { name = "aiofiles" },
     { name = "aiohttp" },
+    { name = "uas-adapter" },
     { name = "uas-api-client" },
 ]
 
@@ -1020,8 +1024,12 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'uas'", specifier = ">=3.9.0" },
     { name = "fab-api-client", marker = "extra == 'all'", git = "https://github.com/brentlopez/fab-api-client.git?tag=v2.1.0" },
     { name = "fab-api-client", marker = "extra == 'fab'", git = "https://github.com/brentlopez/fab-api-client.git?tag=v2.1.0" },
+    { name = "fab-egl-adapter", marker = "extra == 'all'", git = "https://github.com/brentlopez/fab-egl-adapter.git?tag=v2.1.0" },
+    { name = "fab-egl-adapter", marker = "extra == 'fab'", git = "https://github.com/brentlopez/fab-egl-adapter.git?tag=v2.1.0" },
     { name = "jsonschema", specifier = ">=4.0.0" },
     { name = "mutagen", specifier = ">=1.47.0" },
+    { name = "uas-adapter", marker = "extra == 'all'", git = "https://github.com/brentlopez/uas-adapter.git?tag=v2.1.0" },
+    { name = "uas-adapter", marker = "extra == 'uas'", git = "https://github.com/brentlopez/uas-adapter.git?tag=v2.1.0" },
     { name = "uas-api-client", marker = "extra == 'all'", git = "https://github.com/brentlopez/uas-api-client.git?tag=v2.1.0" },
     { name = "uas-api-client", marker = "extra == 'uas'", git = "https://github.com/brentlopez/uas-api-client.git?tag=v2.1.0" },
 ]

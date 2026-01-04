@@ -14,9 +14,9 @@ readme = "README.md"
 license = { text = "MIT" }
 
 [project.optional-dependencies]
-fab = ["fab-api-client"]
-uas = ["uas-api-client", "aiohttp>=3.9.0", "aiofiles>=23.0.0"]
-all = ["fab-api-client", "uas-api-client", "aiohttp>=3.9.0", "aiofiles>=23.0.0"]
+fab = ["fab-api-client", "fab-egl-adapter"]
+uas = ["uas-api-client", "uas-adapter", "aiohttp>=3.9.0", "aiofiles>=23.0.0"]
+all = ["fab-api-client", "fab-egl-adapter", "uas-api-client", "uas-adapter", "aiohttp>=3.9.0", "aiofiles>=23.0.0"]
 
 [dependency-groups]
 dev = [
